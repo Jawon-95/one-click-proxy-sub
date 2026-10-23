@@ -98,7 +98,7 @@ if [[ ! -x /opt/proxy-node/bin/node ]] || [[ $(/opt/proxy-node/bin/node --versio
   install -d -m 0755 /opt/proxy-node
   tar -xJf "$WORK/node.tar.xz" -C /opt/proxy-node --strip-components=1
 fi
-if [[ ! -x /opt/xray/xray ]] || ! /opt/xray/xray version | head -1 | grep -Fq "Xray $XRAY_VERSION "; then
+if [[ ! -x /opt/xray/xray ]] || ! /opt/xray/xray version | grep -F "Xray $XRAY_VERSION " >/dev/null; then
   echo '安装官方 Xray…'
   download "https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION/Xray-$XRAY_ASSET.zip" "$WORK/xray.zip"
   download "https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION/Xray-$XRAY_ASSET.zip.dgst" "$WORK/xray.dgst"
@@ -110,7 +110,10 @@ if digest not in (root/'xray.dgst').read_text().lower(): raise SystemExit('Xray 
 destination=pathlib.Path('/opt/xray'); destination.mkdir(parents=True,exist_ok=True)
 with zipfile.ZipFile(archive) as z:
     for name in ('xray','geoip.dat','geosite.dat','LICENSE'):
-        (destination/name).write_bytes(z.read(name))
+        candidate=destination/(name+'.new')
+        candidate.write_bytes(z.read(name))
+        candidate.chmod(0o755 if name=='xray' else 0o644)
+        candidate.replace(destination/name)
 PY
 fi
 chmod 0755 /opt/xray /opt/xray/xray
