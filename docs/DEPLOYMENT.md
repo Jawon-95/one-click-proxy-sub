@@ -8,7 +8,7 @@
 4. 执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/heads/main/install.sh | sudo bash
 ```
 
 按提示输入完整域名和管理密码。域名不要包含 `https://`、端口或路径。密码至少 8 个字符；留空将随机生成并在安装终端显示一次。
@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/main/i
 ## 查看脚本后安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/main/install.sh -o /tmp/proxysub-install.sh
+curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/heads/main/install.sh -o /tmp/proxysub-install.sh
 less /tmp/proxysub-install.sh
 sudo bash /tmp/proxysub-install.sh
 ```

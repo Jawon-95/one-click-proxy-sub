@@ -11,7 +11,7 @@
 在服务器执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/heads/main/install.sh | sudo bash
 ```
 
 按提示输入域名（例如 `proxy.example.com`）和管理密码。脚本自动安装依赖、生成节点凭证、签发 Let's Encrypt 证书、配置开机自启及证书自动续期。输入密码时不会回显；已有安装再次执行会保留管理密码、优选地址和订阅链接。
