@@ -98,6 +98,7 @@ if [[ ! -x /opt/proxy-node/bin/node ]] || [[ $(/opt/proxy-node/bin/node --versio
   install -d -m 0755 /opt/proxy-node
   tar -xJf "$WORK/node.tar.xz" -C /opt/proxy-node --strip-components=1
 fi
+chown -R root:root /opt/proxy-node
 if [[ ! -x /opt/xray/xray ]] || ! /opt/xray/xray version | grep -F "Xray $XRAY_VERSION " >/dev/null; then
   echo '安装官方 Xray…'
   download "https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION/Xray-$XRAY_ASSET.zip" "$WORK/xray.zip"
