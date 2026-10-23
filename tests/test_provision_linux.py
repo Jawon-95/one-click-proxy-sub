@@ -24,7 +24,8 @@ class ProvisionTests(unittest.TestCase):
             root=Path(folder);root.chmod(0o755)
             module.ETC=root/'manager';module.XRAY_ETC=root/'xray'
             module.CERTS=module.XRAY_ETC/'tls';module.LETSENCRYPT=root/'acme'
-            module.write(module.ETC/'config.json',{'domain':'proxy.example.com','node_password':'fixture-node','ws_path':'/connect'})
+            module.DOMAIN_ADMIN=root/'domain-admin'
+            module.write(module.ETC/'config.json',{'domain':'proxy.example.com','node_password':'fixture-node','ws_path':'/connect','retired_domains':['old.example.com']})
             cert=module.LETSENCRYPT/'live/proxy.example.com'
             module.write(cert/'fullchain.pem','fixture-certificate')
             module.write(cert/'privkey.pem','fixture-private-key',0o600)
@@ -37,6 +38,8 @@ class ProvisionTests(unittest.TestCase):
                             'from pathlib import Path;import sys;assert Path(sys.argv[1]).read_text()=="fixture-private-key"',
                             str(module.CERTS/'domain/privkey.pem')],check=True)
             self.assertEqual((module.CERTS/'domain/privkey.pem').stat().st_mode&0o777,0o640)
+            config=json.loads((module.XRAY_ETC/'config.json').read_text())
+            self.assertTrue(config['inbounds'][0]['streamSettings']['tlsSettings']['rejectUnknownSni'])
 
     def test_fresh_install_and_repeat_keep_state(self):
         spec=importlib.util.spec_from_file_location('isolated_provision',ROOT/'deploy/provision.py')
@@ -63,14 +66,15 @@ class ProvisionTests(unittest.TestCase):
                         self.assertEqual(conn.execute('select path from subscriptions').fetchone()[0],'/subscribe/main')
                         conn.execute("insert into sessions values ('fixture-hash','fixture-csrf',9999999999)")
                     server=sys.modules['server'];generator=sys.modules['generator']
-                    generator.save({'preferredIps':'104.16.1.2#Saved'},config,server.db)
+                    generator.save({'preferredIps':'104.16.1.2#Saved','nodeLimit':1},config,server.db)
                     args.password_file=None
                     module.prepare(args)
                     with sqlite3.connect(root/'data/panel.sqlite3') as conn:
                         self.assertEqual(conn.execute("select value from metadata where key='admin_hash'").fetchone()[0],original_hash)
                         self.assertEqual(conn.execute('select count(*) from sessions').fetchone()[0],1)
                         result=json.loads(conn.execute('select result from generator_state').fetchone()[0])
-                        self.assertEqual(result['counts']['outputNodes'],2)
+                        self.assertEqual(result['counts']['outputNodes'],1)
+                        self.assertEqual(result['settings']['nodeLimit'],1)
                     unit=(root/'units/proxy-subscription.service').read_text()
                     self.assertIn('Restart=always',unit)
                     self.assertIn(str(root/'data'),unit)

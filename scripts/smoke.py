@@ -36,7 +36,7 @@ def main():
     cookie=next(c for c in jar if c.name=='proxy_session')
     assert cookie.secure and cookie.expires>time.time()+29*86400
     state=request('/api/state')
-    assert state['version']=='2.0.0' and 'nodeLinks' not in state['generator']
+    assert state['version']=='2.1.0' and 'nodeLinks' not in state['generator']
     first=next(r for r in state['subscriptions'] if r['enabled'])
     raw=request(first['path']+'?target=raw')
     nodes=base64.b64decode(raw).decode().splitlines()

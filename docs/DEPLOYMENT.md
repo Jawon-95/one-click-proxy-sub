@@ -55,6 +55,7 @@ sudo bash install.sh --domain proxy.example.com --origin-ip YOUR_PUBLIC_IPV4 --p
 | `/opt/proxy-manager` | 当前程序源码与静态资源 |
 | `/etc/proxy-manager/config.json` | 域名、源站 IP、内部节点凭证，root/proxy-sub 可读 |
 | `/var/lib/proxy-manager/panel.sqlite3` | 优选地址、订阅格式缓存、链接、密码哈希、会话 |
+| `/var/lib/proxy-manager-admin` | 域名任务进度及仅 root 可读的切换恢复记录 |
 | `/opt/xray` | 官方 Xray 与路由数据 |
 | `/etc/xray/config.json` | TLS、WebSocket 节点与回落 |
 | `/etc/xray/tls/domain` | Xray 使用的域名证书副本 |
@@ -64,6 +65,23 @@ sudo bash install.sh --domain proxy.example.com --origin-ip YOUR_PUBLIC_IPV4 --p
 | `/etc/letsencrypt` | ACME 账户、证书与续期配置 |
 
 程序使用非 root 的 `xray` 和 `proxy-sub` 账户运行。仅为监听低端口保留 `CAP_NET_BIND_SERVICE`，不把数据库或证书目录暴露成静态资源。
+
+域名更换由按需运行的 root systemd 工作进程执行，只接受经过校验的域名请求；网页进程继续使用非 root 账户。`proxy-domain-change.path` 监听请求，`proxy-domain-change.service` 在需要时签证书、更新服务，并在重启后恢复未完成事务。
+
+## 在面板更换域名
+
+1. 在 Cloudflare 为新域名添加指向本服务器的 A 记录，等待解析生效。首次申请该域名证书建议使用灰云，关闭拦截 HTTP 验证的强制 HTTPS/WAF 规则，保持 TCP 80 可达。
+2. 在面板底部「更换管理和订阅域名」填写完整新域名，点击「更换域名」，在确认框提交。
+3. 系统先验证该域名确实到达本服务器，再签发证书。准备阶段原域名仍可用；证书申请失败不会切换。
+4. 就绪后统一切换 Host/SNI、WebSocket 路径、内部代理密码、订阅地址及二维码，自动打开新域名。切换时连接会短暂中断，旧节点和旧域名随即失效。
+5. 在新域名使用原管理密码登录，重新导入新订阅。跨域名不会迁移浏览器登录 Cookie；新的登录仍保留 30 天。订阅路径、优选列表和数量限制保留。
+6. 新域名需要使用优选入口时，在 Cloudflare 开启橙云并使用「完全（严格）」。域名相关的 DNS 记录仍由用户手动维护；旧记录即使尚未删除，服务也会拒绝旧域名。
+
+不要通过 `--domain` 安装参数代替面板的退役流程。安装参数用于首次配置；面板更换还会停用旧域名和旧节点、清理旧证书，并提供失败恢复。
+
+## 限制订阅节点数量
+
+在优选地址输入框下方设置「订阅节点数量」后保存。0 表示全部（含自动入口）；正整数表示按保存列表顺序、去重后取前 N 个优选地址，不额外加入自动入口。比如 100 返回恰好 100 个优选节点；不足 N 个时返回现有的全部优选节点。完整列表不会截短，恢复为 0 即可再次返回全部。所有平台订阅共享此限制，客户端需刷新订阅。
 
 ## 常见问题
 

@@ -5,6 +5,8 @@
 ```bash
 sudo systemctl status xray proxy-subscription --no-pager
 sudo systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer
+sudo systemctl status proxy-domain-change.path --no-pager
+sudo journalctl -u proxy-domain-change.service -n 50 --no-pager
 sudo systemctl list-timers proxy-cert-renew.timer --no-pager
 sudo journalctl -u xray -n 50 --no-pager
 sudo journalctl -u proxy-subscription -n 50 --no-pager
@@ -68,5 +70,7 @@ PY
 ## 数据边界
 
 面板中的所有链接共享同一份生成结果。停用或删除链接只阻止读取订阅，不会撤回已被客户端保存的节点凭证。修改管理密码只影响后台登录，不会更换代理密码。
+
+面板更换域名会更换内部代理密码和 WebSocket 路径、清除登录会话，并拒绝旧域名，因此旧节点也会失效。切换期间不要运行安装器或手动修改配置；域名任务保存在 `/var/lib/proxy-manager-admin`，服务重启后会恢复未完成的事务。请通过面板查看任务结果，或检查 `proxy-domain-change.service` 的日志。
 
 Cloudflare 灰云/橙云由用户在自己的控制台管理。所有优选入口仍连接同一台自建服务器，最终出口、带宽和套餐流量均属于这台服务器。

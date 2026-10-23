@@ -9,6 +9,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConversionTests(unittest.TestCase):
+    def test_limit_selects_first_endpoints_without_truncating_saved_list(self):
+        preset=(ROOT/'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
+        result=self.convert(preferredIps=preset,nodeLimit=100)
+        self.assertEqual(result.returncode,0,result.stderr)
+        data=json.loads(result.stdout)
+        self.assertEqual(data['settings']['preferredIps'],preset)
+        self.assertEqual(data['counts']['preferredEndpoints'],219)
+        self.assertEqual(data['counts']['selectedEndpoints'],100)
+        self.assertEqual(data['counts']['outputNodes'],100)
+        expected=[line.split('#')[0] for line in preset.splitlines()][:100]
+        nodes=json.loads(data['formats']['json']['body'])
+        self.assertEqual([n['server'] for n in nodes],expected)
+        self.assertEqual(len(base64.b64decode(data['formats']['raw']['body']).decode().splitlines()),100)
+        self.assertEqual(data['formats']['clash']['body'].count('type: trojan'),100)
+        for invalid in (-1,1.5,1001,True,'100'):
+            self.assertNotEqual(self.convert(nodeLimit=invalid).returncode,0)
+
     def convert(self, **changes):
         data = {'nodeLinks':'trojan://fixture-secret@proxy.example.com:443?security=tls&type=ws&host=proxy.example.com&sni=proxy.example.com&path=%2Fconnect#Fixture',
                 'preferredIps':'104.16.1.2#Test\ncdnjs.com:443#CDNJS','keepOriginalHost':True,'includeOriginal':True}

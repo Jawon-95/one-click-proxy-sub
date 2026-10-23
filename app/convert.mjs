@@ -10,6 +10,8 @@ export function convert(input) {
   if (source.length > 65536 || preferred.length > 131072) throw new Error('输入超过大小限制。');
   const parsed = parseNodeLinks(source);
   const endpoints = parsePreferredEndpoints(preferred);
+  const nodeLimit = input.nodeLimit ?? 0;
+  if (!Number.isInteger(nodeLimit) || nodeLimit < 0 || nodeLimit > 1000) throw new Error('节点数量需要是 0–1000 的整数，0 表示全部。');
   // Never silently drop an invalid line when saving a persistent subscription.
   if (parsed.warnings.length || endpoints.warnings.length) throw new Error([...parsed.warnings, ...endpoints.warnings].join('\n'));
   if (parsed.nodes.length > 20 || endpoints.endpoints.length > 1000) throw new Error('最多支持 20 个基础节点和 1000 个优选地址。');
@@ -30,8 +32,11 @@ export function convert(input) {
   const prefix = String(input.namePrefix || '').trim();
   if (prefix.length > 40 || /[\r\n]/.test(prefix)) throw new Error('备注前缀需为 40 字以内的单行文本。');
   const options = {keepOriginalHost: input.keepOriginalHost !== false, namePrefix: prefix};
-  const expanded = expandNodes(parsed.nodes, endpoints.endpoints, options);
-  const nodes = input.includeOriginal !== false ? [
+  const selectedEndpoints = nodeLimit ? endpoints.endpoints.slice(0, nodeLimit) : endpoints.endpoints;
+  if (nodeLimit && !selectedEndpoints.length) throw new Error('限制数量时，请至少填写一个优选地址。');
+  const expanded = expandNodes(parsed.nodes, selectedEndpoints, options);
+  const includeOriginal = !nodeLimit && input.includeOriginal !== false;
+  const nodes = includeOriginal ? [
     ...parsed.nodes.map(n=>({...n, name: n.name+' | 自动入口'})), ...expanded.nodes,
   ] : expanded.nodes;
   if (nodes.length > 5000) throw new Error('生成节点数量超过 5000 个。');
@@ -52,8 +57,8 @@ export function convert(input) {
   }
   formats.plain = {body:nodes.map(renderNodeUri).join('\n')+'\n',contentType:'text/plain; charset=utf-8'};
   return {settings:{nodeLinks:source,preferredIps:preferred,namePrefix:prefix,
-                   keepOriginalHost:options.keepOriginalHost,includeOriginal:input.includeOriginal!==false},
-    counts:{baseNodes:parsed.nodes.length,preferredEndpoints:endpoints.endpoints.length,outputNodes:nodes.length},
+                   keepOriginalHost:options.keepOriginalHost,includeOriginal:input.includeOriginal!==false,nodeLimit},
+    counts:{baseNodes:parsed.nodes.length,preferredEndpoints:endpoints.endpoints.length,selectedEndpoints:selectedEndpoints.length,outputNodes:nodes.length},
     preview:summarizeNodes(nodes,30), warnings,formats};
 }
 

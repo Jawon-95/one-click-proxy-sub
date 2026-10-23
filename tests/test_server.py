@@ -73,6 +73,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(state['generator']['counts']['outputNodes'],220)
         self.assertNotIn('nodeLinks',state['generator'])
         self.assertNotIn('node_password',state)
+        self.assertIn('domainChange',state)
+        self.request('/api/domain','POST',{'domain':'https://invalid.example/'},status=400)
+        self.request('/api/domain','POST',{'domain':'proxy.example.com'},status=400)
         _,data=self.request('/subscribe/main?target=raw')
         self.assertEqual(len(base64.b64decode(data).decode().splitlines()),220)
         self.request('/api/generate','POST',{'preferredIps':'104.16.1.2'},status=403,headers={'X-CSRF-Token':'wrong'})
@@ -80,6 +83,14 @@ class ServerTests(unittest.TestCase):
         self.request('/api/generate','POST',{'preferredIps':'invalid host'},status=400)
         _,still_valid=self.request('/subscribe/main?target=raw')
         self.assertEqual(data,still_valid)
+        _,limited=self.request('/api/generate','POST',{'nodeLimit':100})
+        self.assertEqual(limited['counts']['outputNodes'],100)
+        self.assertEqual(limited['preferredIps'],state['generator']['preferredIps'])
+        _,limited_nodes=self.request('/subscribe/main?target=json')
+        self.assertEqual(len(limited_nodes),100)
+        self.assertEqual(limited_nodes[0]['server'],'cloudflare-ech.com')
+        self.request('/api/generate','POST',{'nodeLimit':-1},status=400)
+        self.request('/api/generate','POST',{'nodeLimit':0})
         _,result=self.request('/api/generate','POST',{'preferredIps':'104.16.1.2#Fixture','nodeLinks':'trojan://attacker@wrong.example'})
         self.assertEqual(result['counts']['outputNodes'],2)
         _,data=self.request('/subscribe/main?target=raw')
@@ -91,6 +102,32 @@ class ServerTests(unittest.TestCase):
         self.request('/api/subscriptions/'+str(row['id']),'PATCH',{'enabled':False})
         self.request(row['path'],status=404)
         self.request('/api/subscriptions/'+str(row['id']),'DELETE',{})
+        _,job=self.request('/api/domain','POST',{'domain':'new.example.com'},status=202)
+        self.assertEqual(job['newUrl'],'https://new.example.com')
+        self.request('/api/domain','POST',{'domain':'second.example.com'},status=400)
+        self.request('/api/generate','POST',{'nodeLimit':10},status=409)
+        (self.server.DATA/'domain-request.json').unlink()
+        # Old HTTP hosts stop serving the panel, assets, API and subscriptions after a cutover.
+        self.server.CONFIG['retired_domains']=['old.example.com']
+        try:
+            for path in ('/','/assets/app.js','/api/state','/subscribe/main?target=raw'):
+                self.request(path,status=421,headers={'Host':'old.example.com'})
+            self.request('/subscribe/main?target=raw',headers={'Host':'proxy.example.com'})
+        finally:
+            self.server.CONFIG.pop('retired_domains')
+        status_dir=self.server.DATA/'domain-test';status_dir.mkdir()
+        self.server.CONFIG['domain_admin_dir']=str(status_dir)
+        progress={'id':'b'*32,'domain':'proxy.example.com','status':'switching'}
+        try:
+            (status_dir/'status.json').write_text(json.dumps(progress))
+            self.request('/api/domain-result/'+'b'*32,status=404,headers={'Cookie':''})
+            progress['status']='succeeded'
+            (status_dir/'status.json').write_text(json.dumps(progress))
+            response,ready=self.request('/api/domain-result/'+'b'*32,headers={'Cookie':''})
+            self.assertEqual(response.headers['Access-Control-Allow-Origin'],'*')
+            self.assertEqual(ready,{'status':'ready','domain':'proxy.example.com','newUrl':'https://proxy.example.com'})
+        finally:
+            self.server.CONFIG.pop('domain_admin_dir')
         self.request('/api/logout','POST',{})
         self.request('/api/state',status=401)
 

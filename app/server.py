@@ -17,6 +17,7 @@ import urllib.parse
 from contextlib import contextmanager
 
 import generator
+import domain_control
 import urllib.request
 
 import qrcode
@@ -130,7 +131,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('X-Frame-Options', 'DENY')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+        # The old panel probes the newly validated HTTPS origin before navigating to it.
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
         self.send_header('Connection', 'close')
         for key, value in (headers or {}).items():
             self.send_header(key, value)
@@ -212,6 +214,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         if self.server.server_port != int(os.environ.get('PROXY_PRIVATE_PORT', '8080')):
             return self.error(404, 'Not found')
+        if CONFIG.get('retired_domains'):
+            host = self.headers.get('Host', '').lower().rstrip('.')
+            if host not in (DOMAIN, DOMAIN+':443'):
+                return self.error(421, '此域名已停用，请使用当前管理域名。')
         if method == 'GET' and (path == '/' or path.startswith('/assets/')):
             relative = 'index.html' if path == '/' else path.removeprefix('/assets/')
             asset = (ASSETS / relative).resolve()
@@ -234,6 +240,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, body, mime, {'profile-update-interval': '24', 'profile-title': 'Singapore Private', 'Vary': 'User-Agent'})
         if not path.startswith('/api/'):
             return self.error(404, 'Not found')
+        match = re.fullmatch(r'/api/domain-result/([a-f0-9]{32})', path)
+        if match and method == 'GET':
+            progress = domain_control.status(CONFIG)
+            if progress.get('id') == match[1] and progress.get('domain') == DOMAIN and progress.get('status') == 'succeeded':
+                return self.reply(200, {'status': 'ready', 'domain': DOMAIN, 'newUrl': BASE},
+                                  headers={'Access-Control-Allow-Origin': '*'})
+            return self.error(404, '尚未完成切换')
         if method != 'GET' and (not self.valid_origin()):
             return self.error(403, '请求来源校验失败，请重新打开管理页面。')
         if path == '/api/login' and method == 'POST':
@@ -265,9 +278,16 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 subscriptions = [public_subscription(r) for r in conn.execute('SELECT * FROM subscriptions ORDER BY created,id')]
             return self.reply(200, {'csrf': session['csrf'], 'domain': DOMAIN, 'origin_ip': HOST, 'base': BASE,
-                'subscriptions': subscriptions, 'domain_ready': True, 'version': '2.0.0',
+                'subscriptions': subscriptions, 'domain_ready': True, 'version': '2.1.0',
+                'domainChange': domain_control.status(CONFIG),
                 'generator': generator.public_state(generator.get_snapshot(db), CONFIG)})
+        if path == '/api/domain' and method == 'GET':
+            return self.reply(200, domain_control.status(CONFIG))
+        if path == '/api/domain' and method == 'POST':
+            return self.reply(202, domain_control.enqueue(self.body().get('domain'), CONFIG))
         if path == '/api/generate' and method == 'POST':
+            if domain_control.busy(CONFIG):
+                return self.error(409, '域名正在更换，请完成后再保存订阅设置。')
             snapshot = generator.save(self.body(), CONFIG, db)
             return self.reply(200, generator.public_state(snapshot, CONFIG))
         if path == '/api/logout' and method == 'POST':

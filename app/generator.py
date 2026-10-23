@@ -19,7 +19,7 @@ def defaults(config):
     node = f'trojan://{quote(config["node_password"], safe="")}@{domain}:443?{query}#My-Proxy'
     preset = (ROOT.parent / 'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
     return {'nodeLinks': node, 'preferredIps': preset, 'namePrefix': '',
-            'keepOriginalHost': True, 'includeOriginal': True}
+            'keepOriginalHost': True, 'includeOriginal': True, 'nodeLimit': 0}
 
 
 def compile_settings(settings, config):
@@ -49,7 +49,10 @@ def save(settings, config, db):
     with LOCK:
         # The server owns credentials/Host/SNI/path; the panel edits endpoints only.
         options = defaults(config)
-        options['preferredIps'] = str(settings.get('preferredIps', options['preferredIps']))
+        previous = get_snapshot(db)
+        retained = previous['settings'] if previous else options
+        options['preferredIps'] = str(settings.get('preferredIps', retained['preferredIps']))
+        options['nodeLimit'] = settings.get('nodeLimit', retained.get('nodeLimit', 0))
         result = compile_settings(options, config)
         stamp = int(time.time())
         with db() as conn:
@@ -69,7 +72,7 @@ def initialize(config, db):
 
 def public_state(snapshot, config):
     result = snapshot['result']
-    return {'preferredIps': snapshot['settings']['preferredIps'], 'updatedAt': snapshot['updatedAt'], 'counts': result['counts'],
+    return {'preferredIps': snapshot['settings']['preferredIps'], 'nodeLimit': snapshot['settings'].get('nodeLimit', 0), 'updatedAt': snapshot['updatedAt'], 'counts': result['counts'],
             'preview': result['preview'], 'warnings': result['warnings'],
             'availableFormats': list(result['formats']), 'defaultPreferredIps': defaults(config)['preferredIps']}
 

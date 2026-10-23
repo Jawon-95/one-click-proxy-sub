@@ -28,6 +28,7 @@ CERTS = XRAY_ETC/'tls'
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_DATA = Path('/var/lib/proxy-sub')
 LEGACY_ADMIN = Path('/root/proxy-deployment')
+DOMAIN_ADMIN = Path('/var/lib/proxy-manager-admin')
 
 
 def run(*args, **kwargs):
@@ -225,14 +226,15 @@ def activate():
         source = LETSENCRYPT/'live'/domain/name
         write(domain_cert/name, source.read_text(), 0o640, 'xray')
     certificates = [{'certificateFile':str(domain_cert/'fullchain.pem'), 'keyFile':str(domain_cert/'privkey.pem')}]
-    if (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
+    if not config.get('retired_domains') and (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
         certificates.append({'certificateFile':str(CERTS/'fullchain.pem'),'keyFile':str(CERTS/'privkey.pem')})
     clients = [{'password':config['node_password'], 'email':'owner'}]
     xray = {'log':{'loglevel':'warning','access':'none'}, 'inbounds':[
         {'tag':'trojan-tls','listen':'0.0.0.0','port':443,'protocol':'trojan',
          'settings':{'clients':clients,'fallbacks':[{'dest':'127.0.0.1:8080','xver':0},
              {'path':config['ws_path'],'dest':'127.0.0.1:10001','xver':0}]},
-         'streamSettings':{'network':'tcp','security':'tls','tlsSettings':{'minVersion':'1.2','alpn':['http/1.1'],'certificates':certificates}}},
+         'streamSettings':{'network':'tcp','security':'tls','tlsSettings':{'minVersion':'1.2','alpn':['http/1.1'],
+             'rejectUnknownSni':bool(config.get('retired_domains')), 'certificates':certificates}}},
         {'tag':'trojan-ws','listen':'127.0.0.1','port':10001,'protocol':'trojan','settings':{'clients':clients},
          'streamSettings':{'network':'ws','security':'none','wsSettings':{'path':config['ws_path'],'heartbeatPeriod':30}}}],
         'outbounds':[{'tag':'direct','protocol':'freedom'},{'tag':'block','protocol':'blackhole'}],
@@ -302,7 +304,48 @@ WantedBy=timers.target
     run('systemctl', 'restart', 'xray.service')
     run('runuser', '-u', 'xray', '--', '/opt/xray/xray', 'run', '-test', '-config', str(XRAY_ETC/'config.json'))
     run('systemctl', 'is-active', 'xray.service', 'proxy-subscription.service', 'proxy-cert-renew.timer')
+    setup_domain_worker()
     print('Ready: https://'+domain)
+
+
+def setup_domain_worker():
+    DOMAIN_ADMIN.mkdir(parents=True, exist_ok=True)
+    DOMAIN_ADMIN.chmod(0o750)
+    os.chown(DOMAIN_ADMIN, 0, grp.getgrnam('proxy-sub').gr_gid)
+    unit('proxy-domain-change.service', '''[Unit]
+Description=ProxySub validated domain change worker and recovery
+After=network-online.target proxy-subscription.service
+Wants=network-online.target proxy-subscription.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/proxy-web/bin/python /opt/proxy-manager/deploy/change_domain.py
+TimeoutStartSec=6min
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+''')
+    unit('proxy-domain-change.path', '''[Unit]
+Description=Watch authenticated ProxySub domain change requests
+
+[Path]
+PathExists=/var/lib/proxy-manager/domain-request.json
+Unit=proxy-domain-change.service
+
+[Install]
+WantedBy=multi-user.target
+''')
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'enable', 'proxy-domain-change.service')
+    run('systemctl', 'enable', '--now', 'proxy-domain-change.path')
 
 
 if __name__ == '__main__':

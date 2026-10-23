@@ -2,7 +2,7 @@
 # ProxySub installer. Safe to run again; persistent configuration is retained.
 set -Eeuo pipefail
 umask 027
-VERSION=2.0.0
+VERSION=2.1.0
 XRAY_VERSION=26.3.27
 NODE_VERSION=22.23.4
 DOMAIN=
@@ -32,8 +32,8 @@ HELP
 done
 [[ $(id -u) == 0 ]] || { echo '请使用 root 或 sudo 运行。' >&2; exit 1; }
 if ((CHECK)); then
-  systemctl --no-pager --full status xray proxy-subscription
-  systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer
+  systemctl --no-pager --full status xray proxy-subscription proxy-domain-change.path
+  systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer proxy-domain-change.path proxy-domain-change.service
   systemctl list-timers proxy-cert-renew.timer --no-pager
   exit 0
 fi

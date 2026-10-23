@@ -7,7 +7,7 @@ const PLATFORMS=[
   {key:'clash',name:'Clash / Mihomo',description:'Clash Verge 等客户端',icon:'clash'},
   {key:'surge',name:'Surge',description:'macOS · iOS',icon:'surge'},
 ];
-let state,csrf='',selectedId,editing,dirty=false,toastTimer;
+let state,csrf='',selectedId,editing,dirty=false,toastTimer,domainJob,domainTimer,pendingDomain='';
 const text=(tag,cls,value)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined)el.textContent=value;return el;};
 function notice(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 function errorAt(id,error){$(id).textContent=error?.message||'';$(id).hidden=!error;}
@@ -24,7 +24,7 @@ function selected(){return state?.subscriptions.find(r=>String(r.id)===String(se
 function urlFor(row,target='auto'){return row.url+(target!=='auto'?'?target='+target:'');}
 function qrFor(row,target='auto'){return '/api/subscriptions/'+row.id+'/qr?target='+target;}
 function date(value){return value?new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未更新';}
-function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim();$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';}
+function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';}
 function renderOutput(){
   const row=selected();
   if(row){$('mainQr').src=qrFor(row);$('mainQr').hidden=false;$('mainUrl').value=row.url;}
@@ -73,12 +73,13 @@ function renderLinks(){
   }
   $('linkRows').replaceChildren(fragment);$('linkCount').textContent=state.subscriptions.length+' 个链接';renderOutput();
 }
-async function reload(){state=await api('/api/state');csrf=state.csrf;$('loginScreen').hidden=true;$('appShell').hidden=false;$('domainBadge').textContent=state.domain;$('versionText').textContent='v'+state.version;$('preferredIps').value=state.generator.preferredIps;markDirty();renderPreview();renderLinks();$('saveStatus').textContent='上次保存：'+date(state.generator.updatedAt)+'。在客户端更新订阅，即可获取最新节点。';}
+async function reload(){state=await api('/api/state');csrf=state.csrf;$('loginScreen').hidden=true;$('appShell').hidden=false;$('domainBadge').textContent=state.domain;$('versionText').textContent='v'+state.version;$('preferredIps').value=state.generator.preferredIps;$('nodeLimit').value=state.generator.nodeLimit||0;markDirty();renderDomain(state.domainChange);renderPreview();renderLinks();$('saveStatus').textContent='上次保存：'+date(state.generator.updatedAt)+'。在客户端更新订阅，即可获取最新节点。';}
 function openLink(row){editing=row||null;$('linkTitle').textContent=row?'编辑订阅链接':'自定义订阅链接';$('linkName').value=row?.name||'';$('linkSlug').value=row?.path.startsWith('/subscribe/')?row.path.slice(11):'';errorAt('linkError',null);$('linkDialog').showModal();}
 function openDelete(row){$('deleteMessage').textContent='删除「'+row.name+'」后，这个地址将无法再更新订阅。此操作无法恢复。';$('deleteDialog').showModal();$('confirmDelete').onclick=()=>busy($('confirmDelete'),async()=>{await api('/api/subscriptions/'+row.id,'DELETE',{});$('deleteDialog').close();await reload();notice('链接已删除');});}
 $('loginForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{errorAt('loginError',null);try{const value=await api('/api/login','POST',{password:$('loginPassword').value});csrf=value.csrf;$('loginPassword').value='';await reload();}catch(error){errorAt('loginError',error);}});});
 $('preferredIps').addEventListener('input',markDirty);
-$('preferredForm').addEventListener('submit',event=>{event.preventDefault();busy($('saveButton'),async()=>{errorAt('saveError',null);try{await api('/api/generate','POST',{preferredIps:$('preferredIps').value});await reload();notice('已保存，所有订阅链接立即更新');}catch(error){errorAt('saveError',error);}});});
+$('nodeLimit').addEventListener('input',markDirty);
+$('preferredForm').addEventListener('submit',event=>{event.preventDefault();busy($('saveButton'),async()=>{errorAt('saveError',null);try{await api('/api/generate','POST',{preferredIps:$('preferredIps').value,nodeLimit:$('nodeLimit').valueAsNumber});await reload();notice('已保存，所有订阅链接立即更新');}catch(error){errorAt('saveError',error);}});});
 $('restoreButton').addEventListener('click',()=>{$('preferredIps').value=state.generator.defaultPreferredIps;markDirty();notice('已填入预置地址，点击保存后生效');});
 $('subscriptionSelect').addEventListener('change',()=>{selectedId=$('subscriptionSelect').value;renderOutput();});
 $('copyMain').addEventListener('click',()=>busy($('copyMain'),()=>copy(selected()?.url)));
@@ -91,5 +92,30 @@ $('logoutButton').addEventListener('click',()=>busy($('logoutButton'),async()=>{
 $('cancelDelete').addEventListener('click',()=>$('deleteDialog').close());
 document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
 $('checkConnection').addEventListener('click',()=>busy($('checkConnection'),async()=>{const value=await api('/api/connection');$('connectionStatus').textContent=value.proxied===true?'已检测到 Cloudflare 橙云':value.proxied===false?'当前为仅 DNS 直连':'暂时无法确认，请稍后重试';}));
+function renderDomain(progress){
+  if(!progress||progress.status==='idle')return;
+  const running=['queued','validating','certificate','switching'].includes(progress.status);
+  $('domainStatus').textContent=progress.message||'正在等待域名更换任务…';
+  $('domainButton').disabled=running;$('newDomain').disabled=running;$('saveButton').disabled=running;
+  if(progress.status==='failed'){errorAt('domainError',new Error(progress.message));clearTimeout(domainTimer);domainJob=undefined;return;}
+  if(running){domainJob=progress;const link=$('newDomainLink');link.href=progress.newUrl;link.hidden=false;clearTimeout(domainTimer);domainTimer=setTimeout(pollDomain,1500);}
+}
+async function pollDomain(){
+  if(!domainJob)return;
+  const job=domainJob;
+  try{
+    const response=await fetch('/api/domain',{credentials:'same-origin',cache:'no-store'});
+    if(response.status===401){clearTimeout(domainTimer);domainJob=undefined;showLogin();notice('请使用原密码重新登录，查看域名更换结果');return;}
+    if(response.ok){const progress=await response.json();if(progress.id===job.id){renderDomain(progress);if(progress.status==='failed')return;}}
+  }catch{}
+  try{
+    const response=await fetch(job.newUrl+'/api/domain-result/'+job.id,{credentials:'omit',cache:'no-store',mode:'cors'});
+    if(response.ok&&(await response.json()).status==='ready'){dirty=false;window.location.assign(job.newUrl);return;}
+  }catch{}
+  clearTimeout(domainTimer);domainTimer=setTimeout(pollDomain,2000);
+}
+$('domainForm').addEventListener('submit',event=>{event.preventDefault();errorAt('domainError',null);if(dirty){errorAt('domainError',new Error('请先保存优选地址和数量设置，再更换域名。'));return;}pendingDomain=$('newDomain').value.trim();$('domainConfirmMessage').textContent='将 '+state.domain+' 更换为 '+pendingDomain+'。系统会先验证解析并申请证书，失败时保留原域名。';$('domainConfirmDialog').showModal();});
+$('cancelDomain').addEventListener('click',()=>$('domainConfirmDialog').close());
+$('confirmDomain').addEventListener('click',()=>busy($('confirmDomain'),async()=>{try{const job=await api('/api/domain','POST',{domain:pendingDomain});$('domainConfirmDialog').close();renderDomain(job);}catch(error){$('domainConfirmDialog').close();errorAt('domainError',error);}}));
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 reload().catch(error=>{showLogin();if(error.message!=='请先登录')errorAt('loginError',error);});
