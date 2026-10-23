@@ -22,7 +22,9 @@ ETC = Path('/etc/proxy-manager')
 DATA = Path('/var/lib/proxy-manager')
 APP = Path('/opt/proxy-manager')
 RUNTIME = Path('/opt/proxy-web')
-CERTS = Path('/etc/xray/tls')
+XRAY_ETC = Path('/etc/xray')
+LETSENCRYPT = Path('/etc/letsencrypt')
+CERTS = XRAY_ETC/'tls'
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_DATA = Path('/var/lib/proxy-sub')
 LEGACY_ADMIN = Path('/root/proxy-deployment')
@@ -97,7 +99,7 @@ def prepare(args):
         raise SystemExit('公网 IPv4 地址不正确。')
     node_password = config.get('node_password') or urlsplit(legacy.get('uri', '').strip()).username
     if not node_password:
-        old_xray = read('/etc/xray/config.json', {})
+        old_xray = read(XRAY_ETC/'config.json', {})
         node_password = next((c.get('password') for i in old_xray.get('inbounds', []) if i.get('protocol')=='trojan'
                               for c in i.get('settings', {}).get('clients', []) if c.get('password')), None)
     node_password = node_password or secrets.token_urlsafe(32)
@@ -210,15 +212,17 @@ def activate():
     config = read(ETC/'config.json')
     domain = config['domain']
     xray_gid = grp.getgrnam('xray').gr_gid
-    Path('/etc/xray').mkdir(mode=0o750, exist_ok=True)
-    Path('/etc/xray').chmod(0o750)
-    os.chown('/etc/xray', 0, xray_gid)
+    XRAY_ETC.mkdir(mode=0o750, exist_ok=True)
+    XRAY_ETC.chmod(0o750)
+    os.chown(XRAY_ETC, 0, xray_gid)
     domain_cert = CERTS/'domain'
     domain_cert.mkdir(mode=0o750, parents=True, exist_ok=True)
+    CERTS.chmod(0o750)
+    domain_cert.chmod(0o750)
     os.chown(CERTS, 0, xray_gid)
     os.chown(domain_cert, 0, xray_gid)
     for name in ('fullchain.pem', 'privkey.pem'):
-        source = Path('/etc/letsencrypt/live')/domain/name
+        source = LETSENCRYPT/'live'/domain/name
         write(domain_cert/name, source.read_text(), 0o640, 'xray')
     certificates = [{'certificateFile':str(domain_cert/'fullchain.pem'), 'keyFile':str(domain_cert/'privkey.pem')}]
     if (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
@@ -237,7 +241,7 @@ def activate():
     write(candidate, xray, 0o640, 'xray')
     # The service user must be able to read the final location; validation here is root.
     run('/opt/xray/xray', 'run', '-test', '-config', str(candidate))
-    write('/etc/xray/config.json', xray, 0o640, 'xray')
+    write(XRAY_ETC/'config.json', xray, 0o640, 'xray')
     candidate.unlink()
     unit('xray.service', '''[Unit]
 Description=ProxySub Xray TLS and WebSocket service
@@ -291,12 +295,12 @@ Unit=proxy-cert-renew.service
 [Install]
 WantedBy=timers.target
 ''')
-    hook = Path('/etc/letsencrypt/renewal-hooks/deploy/20-xray-cert')
+    hook = LETSENCRYPT/'renewal-hooks/deploy/20-xray-cert'
     write(hook, '#!/usr/bin/env bash\nset -euo pipefail\nexec /opt/proxy-web/bin/python /opt/proxy-manager/deploy/renew_cert.py\n', 0o750)
     run('systemctl', 'daemon-reload')
     run('systemctl', 'enable', '--now', 'xray.service', 'proxy-cert-renew.timer')
     run('systemctl', 'restart', 'xray.service')
-    run('runuser', '-u', 'xray', '--', '/opt/xray/xray', 'run', '-test', '-config', '/etc/xray/config.json')
+    run('runuser', '-u', 'xray', '--', '/opt/xray/xray', 'run', '-test', '-config', str(XRAY_ETC/'config.json'))
     run('systemctl', 'is-active', 'xray.service', 'proxy-subscription.service', 'proxy-cert-renew.timer')
     print('Ready: https://'+domain)
 
