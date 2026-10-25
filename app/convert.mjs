@@ -36,9 +36,14 @@ export function convert(input) {
   if (nodeLimit && !selectedEndpoints.length) throw new Error('限制数量时，请至少填写一个优选地址。');
   const expanded = expandNodes(parsed.nodes, selectedEndpoints, options);
   const includeOriginal = !nodeLimit && input.includeOriginal !== false;
-  const nodes = includeOriginal ? [
+  // Direct nodes bypass Cloudflare: connect to the origin IP, keep the domain as Host/SNI.
+  const directIp = String(input.directIp || '').trim();
+  if (directIp && isIP(directIp) !== 4) throw new Error(`直连 IP 格式不正确：${directIp}`);
+  const direct = directIp ? expandNodes(parsed.nodes, [{host: directIp, port: 0, label: '直连'}],
+                                        {...options, namePrefix: ''}).nodes : [];
+  const nodes = [...direct, ...(includeOriginal ? [
     ...parsed.nodes.map(n=>({...n, name: n.name+' | 自动入口'})), ...expanded.nodes,
-  ] : expanded.nodes;
+  ] : expanded.nodes)];
   if (nodes.length > 5000) throw new Error('生成节点数量超过 5000 个。');
   // Keep user remarks visible and ensure policy names remain unique.
   const names = new Map();
@@ -56,9 +61,9 @@ export function convert(input) {
     }
   }
   formats.plain = {body:nodes.map(renderNodeUri).join('\n')+'\n',contentType:'text/plain; charset=utf-8'};
-  return {settings:{nodeLinks:source,preferredIps:preferred,namePrefix:prefix,
+  return {settings:{nodeLinks:source,preferredIps:preferred,namePrefix:prefix,directIp,
                    keepOriginalHost:options.keepOriginalHost,includeOriginal:input.includeOriginal!==false,nodeLimit},
-    counts:{baseNodes:parsed.nodes.length,preferredEndpoints:endpoints.endpoints.length,selectedEndpoints:selectedEndpoints.length,outputNodes:nodes.length},
+    counts:{baseNodes:parsed.nodes.length,preferredEndpoints:endpoints.endpoints.length,selectedEndpoints:selectedEndpoints.length,directNodes:direct.length,outputNodes:nodes.length},
     preview:summarizeNodes(nodes,30), warnings,formats};
 }
 

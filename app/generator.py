@@ -18,7 +18,7 @@ def defaults(config):
                        'path': config.get('ws_path', '/connect'), 'allowInsecure': '0'})
     node = f'trojan://{quote(config["node_password"], safe="")}@{domain}:443?{query}#My-Proxy'
     preset = (ROOT.parent / 'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
-    return {'nodeLinks': node, 'preferredIps': preset, 'namePrefix': '',
+    return {'nodeLinks': node, 'preferredIps': preset, 'namePrefix': '', 'directIp': config.get('origin_ip', ''),
             'keepOriginalHost': True, 'includeOriginal': True, 'nodeLimit': 0}
 
 

@@ -73,7 +73,7 @@ class ProvisionTests(unittest.TestCase):
                         self.assertEqual(conn.execute("select value from metadata where key='admin_hash'").fetchone()[0],original_hash)
                         self.assertEqual(conn.execute('select count(*) from sessions').fetchone()[0],1)
                         result=json.loads(conn.execute('select result from generator_state').fetchone()[0])
-                        self.assertEqual(result['counts']['outputNodes'],1)
+                        self.assertEqual(result['counts']['outputNodes'],2)
                         self.assertEqual(result['settings']['nodeLimit'],1)
                     unit=(root/'units/proxy-subscription.service').read_text()
                     self.assertIn('Restart=always',unit)

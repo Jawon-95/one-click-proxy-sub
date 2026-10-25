@@ -57,6 +57,25 @@ class ConversionTests(unittest.TestCase):
         self.assertIn('Host: "proxy.example.com"', data['formats']['clash']['body'])
         self.assertIn('ws=true', data['formats']['surge']['body'])
 
+    def test_direct_node_is_first_and_bypasses_cdn(self):
+        for limit in (0,1):
+            with self.subTest(limit=limit):
+                result=self.convert(directIp='203.0.113.10',nodeLimit=limit)
+                self.assertEqual(result.returncode,0,result.stderr)
+                data=json.loads(result.stdout)
+                self.assertEqual(data['counts']['directNodes'],1)
+                nodes=json.loads(data['formats']['json']['body'])
+                self.assertEqual(len(nodes),(4 if limit==0 else 2))
+                first=nodes[0]
+                self.assertEqual((first['server'],first['port']),('203.0.113.10',443))
+                self.assertEqual((first['sni'],first['hostHeader']),('proxy.example.com','proxy.example.com'))
+                self.assertIn('直连',first['name'])
+                self.assertNotEqual(nodes[1]['server'],'203.0.113.10')
+                raw=base64.b64decode(data['formats']['raw']['body']).decode().splitlines()
+                self.assertTrue(raw[0].startswith('trojan://fixture-secret@203.0.113.10:443?'))
+                self.assertIn('server: "203.0.113.10"',data['formats']['clash']['body'].split('proxy-groups')[0])
+        self.assertNotEqual(self.convert(directIp='not-an-ip').returncode,0)
+
     def test_invalid_or_unsupported_endpoints_fail(self):
         for value in ['https://example.com','104.16.1.2:80','bad domain.com','[invalid-ipv6]']:
             with self.subTest(value=value):
