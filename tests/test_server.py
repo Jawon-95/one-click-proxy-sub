@@ -139,23 +139,6 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn(b'sourceSubscriptionUrl',html)
         self.request('/assets/../server.py',status=404)
 
-    def test_browser_format_and_qr_are_opt_in(self):
-        self.request('/subscribe/main?target=browser', status=400)
-        self.server.CONFIG['browser_proxy'] = {'enabled': True, 'secret': 'fixture-browser-secret', 'port': 8443}
-        try:
-            _, value = self.request('/subscribe/main?target=browser')
-            self.assertEqual(value['nodes'][0]['scheme'], 'https')
-            self.assertEqual(value['nodes'][0]['host'], '203.0.113.10')
-            self.assertNotIn('fixture-proxy-secret', json.dumps(value))
-            self.login()
-            _, state = self.request('/api/state')
-            self.assertIn('browser', state['generator']['availableFormats'])
-            _, qr = self.request('/api/subscriptions/1/qr?target=browser')
-            self.assertIn(b'<svg', qr)
-            self.request('/api/logout', 'POST', {})
-        finally:
-            self.server.CONFIG.pop('browser_proxy')
-
 
 if __name__=='__main__':
     unittest.main()

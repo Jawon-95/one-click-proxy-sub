@@ -1,9 +1,0 @@
-<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="popup.css"><title>新加坡专线</title></head>
-<body>
-<header><div><span class="eyebrow">SINGAPORE · BROWSER ONLY</span><h1>新加坡专线</h1></div><span id="badge" class="badge">网页已锁定</span></header>
-<section class="connection"><div class="small">当前出口</div><div id="ip">尚未连接</div><p id="message">正在读取状态…</p><div class="actions"><button id="connect" class="primary">连接所选节点</button><button id="disconnect">断开并锁网</button></div></section>
-<section><div class="section-title"><h2>节点</h2><button id="test">测试选中节点</button></div><select id="nodes" size="7" aria-label="节点列表"></select><div class="actions"><button id="testAll">测试全部</button><button id="update">更新订阅</button></div><p class="hint">延迟为通过该节点完成 HTTPS 请求的耗时，非下载带宽。选中后点击“连接”才会切换。</p></section>
-<details><summary>订阅设置</summary><label for="subscription">HTTPS 订阅链接</label><input id="subscription" type="password" placeholder="粘贴现有订阅链接" autocomplete="off"><button id="save">保存并获取节点</button><p class="hint">无需本地程序。自动获取浏览器专用格式；首次导入时仅订阅请求会直接连接，网页仍被锁定。凭据保存在此分身的本地扩展存储中。</p></details>
-<footer>此分身全站代理 · 无国内直连规则<br>断开、故障时锁网。请保持插件启用；禁用或卸载插件会移除插件保护。无痕窗口不受支持。</footer>
-<script src="popup.js"></script></body></html>

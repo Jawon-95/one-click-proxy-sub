@@ -11,7 +11,6 @@ import pwd
 import re
 import secrets
 import shutil
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -227,23 +226,12 @@ def activate():
         source = LETSENCRYPT/'live'/domain/name
         write(domain_cert/name, source.read_text(), 0o640, 'xray')
     certificates = [{'certificateFile':str(domain_cert/'fullchain.pem'), 'keyFile':str(domain_cert/'privkey.pem')}]
-    browser = config.get('browser_proxy', {})
-    browser_fallback = []
-    if browser.get('enabled') and browser.get('fronted_by_xray'):
-        browser_cert = CERTS/'browser'
-        browser_cert.mkdir(mode=0o750, parents=True, exist_ok=True)
-        browser_cert.chmod(0o750)
-        os.chown(browser_cert, 0, xray_gid)
-        for name in ('fullchain.pem', 'privkey.pem'):
-            write(browser_cert/name, (LETSENCRYPT/'live'/browser['certificate_name']/name).read_text(), 0o640, 'xray')
-        certificates.append({'certificateFile': str(browser_cert/'fullchain.pem'), 'keyFile': str(browser_cert/'privkey.pem')})
-        browser_fallback.append({'name': browser['host'], 'dest': '127.0.0.1:'+str(browser.get('internal_port', 18080)), 'xver': 0})
     if not config.get('retired_domains') and (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
         certificates.append({'certificateFile':str(CERTS/'fullchain.pem'),'keyFile':str(CERTS/'privkey.pem')})
     clients = [{'password':config['node_password'], 'email':'owner'}]
     xray = {'log':{'loglevel':'warning','access':'none'}, 'inbounds':[
         {'tag':'trojan-tls','listen':'0.0.0.0','port':443,'protocol':'trojan',
-         'settings':{'clients':clients,'fallbacks':browser_fallback+[{'dest':'127.0.0.1:8080','xver':0},
+         'settings':{'clients':clients,'fallbacks':[{'dest':'127.0.0.1:8080','xver':0},
              {'path':config['ws_path'],'dest':'127.0.0.1:10001','xver':0}]},
          'streamSettings':{'network':'tcp','security':'tls','tlsSettings':{'minVersion':'1.2','alpn':['http/1.1'],
              'rejectUnknownSni':bool(config.get('retired_domains')), 'certificates':certificates}}},
@@ -360,100 +348,17 @@ WantedBy=multi-user.target
     run('systemctl', 'enable', '--now', 'proxy-domain-change.path')
 
 
-def setup_browser_proxy(browser_host=None, browser_port=None):
-    """Opt-in HTTPS proxy. Port 443 uses an SNI fallback to an independent backend."""
-    config = read(ETC/'config.json')
-    origin = config['origin_ip']
-    options = config.get('browser_proxy', {})
-    host = (browser_host or options.get('host') or origin).lower().rstrip('.')
-    if host == config['domain']:
-        raise ValueError('浏览器专用入口必须使用独立域名，不能与管理域名相同。')
-    if host != origin:
-        if len(host) > 253 or '.' not in host or not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', p) for p in host.split('.')):
-            raise ValueError('浏览器代理域名格式不正确。')
-        addresses = {answer[4][0] for answer in socket.getaddrinfo(host, 80, type=socket.SOCK_STREAM)}
-        if addresses != {origin}:
-            raise ValueError('浏览器代理域名必须为仅 DNS，且只解析到本机公网 IPv4。不能使用 Cloudflare 橙云。')
-    port = int(browser_port or options.get('port') or (443 if host != origin else 8443))
-    if (port != 443 and not 1024 <= port <= 65535) or port in (8080, 10001, 18080):
-        raise ValueError('浏览器代理端口不能与现有服务冲突。')
-    if port == 443 and host == origin:
-        raise ValueError('共用 443 端口时需要独立的仅 DNS 域名。')
-    identity = ['--ip-address', origin, '--required-profile', 'shortlived'] if host == origin else ['-d', host]
-    run('/opt/certbot/bin/certbot', 'certonly', '--webroot', '-w', config['acme_root'],
-        *identity, '--cert-name', host, '--agree-tos', '--register-unsafely-without-email', '--non-interactive', '--keep-until-expiring')
-    destination = ETC/'browser-tls'
-    destination.mkdir(mode=0o750, parents=True, exist_ok=True)
-    destination.chmod(0o750)
-    os.chown(destination, 0, grp.getgrnam('proxy-sub').gr_gid)
-    for name in ('fullchain.pem', 'privkey.pem'):
-        write(destination/name, (LETSENCRYPT/'live'/host/name).read_text(), 0o640, 'proxy-sub')
-    options.update(enabled=True, host=host, certificate_name=host, port=port, fronted_by_xray=port == 443,
-                   internal_port=18080, secret=options.get('secret') or secrets.token_hex(32),
-                   certificate=str(destination/'fullchain.pem'), private_key=str(destination/'privkey.pem'))
-    config['browser_proxy'] = options
-    write(ETC/'config.json', config, 0o640, 'proxy-sub')
-    unit('proxy-browser.service', f'''[Unit]
-Description=ProxySub authenticated browser HTTPS proxy
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=simple
-User=proxy-sub
-Group=proxy-sub
-WorkingDirectory={APP}
-Environment=PROXY_CONFIG={ETC}/config.json
-ExecStart={RUNTIME}/bin/python {APP}/app/browser_proxy.py
-Restart=always
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-# SQLite WAL readers still need shared-memory lock coordination.
-# SQL access itself remains read-only in browser_proxy.py.
-ReadWritePaths={config['data_dir']}
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-LimitNOFILE=4096
-MemoryMax=384M
-TasksMax=160
-UMask=0077
-
-[Install]
-WantedBy=multi-user.target
-''')
-    run('systemctl', 'daemon-reload')
-    run('systemctl', 'enable', '--now', 'proxy-browser.service')
-    run('systemctl', 'restart', 'proxy-browser.service', 'proxy-subscription.service')
-    if options['fronted_by_xray']:
-        # Validate candidate and service-account certificate access before restart.
-        activate()
-    # Only open this explicit port if a supported host firewall is active.
-    if shutil.which('firewall-cmd') and subprocess.run(['firewall-cmd', '--state'], capture_output=True).returncode == 0:
-        run('firewall-cmd', '--permanent', f'--add-port={port}/tcp')
-        run('firewall-cmd', f'--add-port={port}/tcp')
-    elif shutil.which('ufw') and 'Status: active' in subprocess.run(['ufw', 'status'], capture_output=True, text=True).stdout:
-        run('ufw', 'allow', f'{port}/tcp')
-    print(f'Browser HTTPS proxy ready on TCP {port}. Cloud security groups must also permit this port.')
-
-
 if __name__ == '__main__':
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['prepare','activate','domain','browser'])
+    parser.add_argument('action', choices=['prepare','activate','domain'])
     parser.add_argument('--domain')
     parser.add_argument('--origin-ip')
     parser.add_argument('--password-file')
-    parser.add_argument('--browser-host')
-    parser.add_argument('--browser-port', type=int)
     args = parser.parse_args()
     if args.action == 'prepare':
         prepare(args)
     elif args.action == 'activate':
         activate()
-    elif args.action == 'browser':
-        setup_browser_proxy(args.browser_host, args.browser_port)
     else:
         print(read(ETC/'config.json')['domain'])

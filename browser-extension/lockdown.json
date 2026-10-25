@@ -1,4 +1,0 @@
-[
-  {"id":1,"priority":1,"action":{"type":"block"},"condition":{"regexFilter":"^(https?|wss?)://","resourceTypes":["main_frame","sub_frame","stylesheet","script","image","font","object","xmlhttprequest","ping","csp_report","media","websocket","webtransport","other"]}},
-  {"id":2,"priority":20,"action":{"type":"block"},"condition":{"resourceTypes":["webtransport"]}}
-]
