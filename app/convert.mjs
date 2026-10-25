@@ -45,12 +45,13 @@ export function convert(input) {
     ...parsed.nodes.map(n=>({...n, name: n.name+' | 自动入口'})), ...expanded.nodes,
   ] : expanded.nodes)];
   if (nodes.length > 5000) throw new Error('生成节点数量超过 5000 个。');
-  // Keep user remarks visible and ensure policy names remain unique.
-  const names = new Map();
-  for (const node of nodes) {
-    const count = (names.get(node.name)||0)+1; names.set(node.name,count);
-    if (count > 1) node.name += ` (${count})`;
-  }
+  // Number the final output order (including the direct and automatic entries),
+  // keeping endpoint remarks intact. The number makes duplicate labels unique.
+  nodes.forEach((node, index) => {
+    const remark = node.endpointLabel || node.endpointSource || '自动入口';
+    const extra = node.endpointSource && !direct.includes(node) ? prefix : '';
+    node.name = [String(index + 1).padStart(3, '0'), extra, remark].filter(Boolean).join(' | ');
+  });
   const formats = {};
   const warnings = expanded.warnings;
   for (const target of ['raw','clash','surge','json']) {

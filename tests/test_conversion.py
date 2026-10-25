@@ -3,12 +3,26 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConversionTests(unittest.TestCase):
+    def test_sequential_names_keep_remarks_across_all_formats(self):
+        result=self.convert(directIp='203.0.113.10',preferredIps='104.16.1.2#Visa新加坡\n104.16.1.3#同名\n104.16.1.4#同名\n104.16.1.5')
+        self.assertEqual(result.returncode,0,result.stderr)
+        data=json.loads(result.stdout)
+        expected=['001 | 直连','002 | 自动入口','003 | Visa新加坡','004 | 同名','005 | 同名','006 | 104.16.1.5:443']
+        self.assertEqual([n['name'] for n in json.loads(data['formats']['json']['body'])],expected)
+        links=base64.b64decode(data['formats']['raw']['body']).decode().splitlines()
+        self.assertEqual([unquote(urlsplit(link).fragment) for link in links],expected)
+        for name in expected:
+            self.assertIn(name,data['formats']['clash']['body'])
+            self.assertIn(name,data['formats']['surge']['body'])
+        limited=json.loads(self.convert(directIp='203.0.113.10',nodeLimit=1).stdout)
+        self.assertEqual([n['name'] for n in json.loads(limited['formats']['json']['body'])],['001 | 直连','002 | Test'])
+
     def test_limit_selects_first_endpoints_without_truncating_saved_list(self):
         preset=(ROOT/'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
         result=self.convert(preferredIps=preset,nodeLimit=100)

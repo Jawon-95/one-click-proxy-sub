@@ -2,7 +2,7 @@
 # ProxySub installer. Safe to run again; persistent configuration is retained.
 set -Eeuo pipefail
 umask 027
-VERSION=2.1.0
+VERSION=2.1.1
 XRAY_VERSION=26.3.27
 NODE_VERSION=22.23.4
 DOMAIN=
