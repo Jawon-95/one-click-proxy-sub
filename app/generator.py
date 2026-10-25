@@ -74,7 +74,7 @@ def public_state(snapshot, config):
     result = snapshot['result']
     return {'preferredIps': snapshot['settings']['preferredIps'], 'nodeLimit': snapshot['settings'].get('nodeLimit', 0), 'updatedAt': snapshot['updatedAt'], 'counts': result['counts'],
             'preview': result['preview'], 'warnings': result['warnings'],
-            'availableFormats': list(result['formats']), 'defaultPreferredIps': defaults(config)['preferredIps']}
+            'availableFormats': list(result['formats']) + (['browser'] if config.get('browser_proxy', {}).get('enabled') else []), 'defaultPreferredIps': defaults(config)['preferredIps']}
 
 
 def render(snapshot, target, subscription_url):

@@ -6,6 +6,7 @@ const PLATFORMS=[
   {key:'shadowrocket',name:'Shadowrocket',description:'iPhone · iPad',icon:'shadowrocket',target:'raw'},
   {key:'clash',name:'Clash / Mihomo',description:'Clash Verge 等客户端',icon:'clash'},
   {key:'surge',name:'Surge',description:'macOS · iOS',icon:'surge'},
+  {key:'browser',name:'浏览器专线插件',description:'无需本地核心 · HTTPS 全站代理',icon:'browser'},
 ];
 let state,csrf='',selectedId,editing,dirty=false,toastTimer,domainJob,domainTimer,pendingDomain='';
 const text=(tag,cls,value)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined)el.textContent=value;return el;};

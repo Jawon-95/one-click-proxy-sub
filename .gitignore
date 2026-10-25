@@ -24,6 +24,7 @@ __pycache__/
 .venv/
 venv/
 node_modules/
+browser-extension/_metadata/
 .pytest_cache/
 .coverage
 htmlcov/

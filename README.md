@@ -4,6 +4,29 @@
 
 打开自己的域名，输入管理密码，即可编辑优选 IP/域名、复制各平台订阅链接、扫描二维码。基础节点、Host、SNI 和 WebSocket 路径全部自动配置，无需粘贴节点，也不需要 Cloudflare Worker、KV 或 API Token。
 
+## 浏览器插件：下载即用
+
+1. 从 [最新 Release](https://github.com/Jawon-95/one-click-proxy-sub/releases/latest) 下载 **browser-extension.zip**，解压到固定位置。
+2. 用原来的 `--user-data-dir` 快捷方式打开浏览器分身，在分身内打开 `edge://extensions`（Chrome 为 `chrome://extensions`），开启开发人员模式，点击“加载解压缩的扩展”，选择解压后的 **browser-extension** 文件夹。
+3. 点击工具栏里的“新加坡专线”，在“订阅设置”粘贴自己的订阅链接，点击“保存并获取节点”。选择节点后点击“连接所选节点”。
+4. 连接成功才允许网页联网；“断开并锁网”和代理故障会阻止网页请求。首次安装后重启分身，关闭旧连接。
+
+插件无需本地代理核心、Windows 服务或管理员权限；国内和国外网页使用同一个服务器出口。只安装在分身中，普通浏览器和桌面软件的代理设置保持原样。**请保持插件启用：禁用或卸载会失去保护。** 保护范围是该个人资料的网页请求，不包含终端 Claude Code、其他应用或无痕窗口。系统 TUN 仍可能影响到服务器的底层连接。
+
+自己的服务器须先开启下面的浏览器入口；普通 Trojan 订阅不能直接由浏览器使用。当前每台服务器发布一个浏览器兼容 HTTPS 入口，原 Trojan/CDN 节点继续提供给原客户端。详见 [插件说明](browser-extension/README.md)。
+
+## 新服务器：同时安装代理服务与浏览器入口
+
+准备两个不同子域名，A 记录均指向新服务器公网 IPv4，并放行 TCP 80、443（SSH 使用 22 或自定义端口）。首次申请证书时均设为“仅 DNS”，浏览器入口 **browser.example.com 必须一直保持灰云，仅 DNS**。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/heads/main/install.sh | sudo bash -s -- --domain proxy.example.com --browser-host browser.example.com
+```
+
+将两个示例域名替换成自己的，按提示设置管理密码。完成后可给管理域名 `proxy.example.com` 开橙云，SSL/TLS 选“完全（严格）”；浏览器入口保持灰云。打开管理页创建或复制订阅，在插件中导入即可。
+
+重复运行同一命令可升级并保留配置。换服务器可直接全新安装，再导入新订阅；需要保留旧订阅地址和凭据时，按 [迁移说明](docs/OPERATIONS.md) 备份恢复数据库与配置。不要把旧服务器的公网 IP 原样复制到新服务器。[详细部署和回滚](docs/BROWSER_PROXY.md)。
+
 ## 一键安装
 
 先准备一台 **systemd Linux 服务器**和一个托管在 Cloudflare 的域名，将子域名的 **A 记录指向服务器公网 IPv4**，首次签发证书前暂时选择灰云「仅 DNS」，并放行 TCP **22、80、443**。
@@ -26,6 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/h
 详细安装、参数和故障处理：[部署文档](docs/DEPLOYMENT.md)。
 
 ## 功能
+
+- **纯浏览器插件**：仓库内 `browser-extension/` 提供订阅更新、节点选择、HTTPS 延迟测试和断开锁网；不运行本地核心。服务器可选启用独立受认证的 HTTPS 入口，原 Trojan/CDN 功能保留。见 [插件使用说明](browser-extension/README.md) 和 [服务器配置](docs/BROWSER_PROXY.md)。
 
 - **自动生成节点**：内置 Trojan + WebSocket + TLS，固定保留自己的 Host/SNI，支持 Cloudflare 橙云。
 - **直连节点置顶**：订阅第一个节点直接连接服务器公网 IP（SNI/Host 仍为自己的域名），不经过 Cloudflare，CDN 整体变慢时可作为备选。
@@ -72,6 +97,7 @@ config/       默认优选地址，不包含部署凭证
 deploy/       初始化、迁移、证书部署与服务配置
 docs/         部署与运维文档
 scripts/      打包与开发工具
+browser-extension/ 纯浏览器插件源码，无本地服务或核心
 tests/        转换和 HTTP/SQLite 集成测试
 install.sh    一键安装入口
 ```

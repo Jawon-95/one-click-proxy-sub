@@ -93,7 +93,9 @@ def rollback(old):
 def finish(job, old):
     warning = False
     # Old lineages are no longer referenced; stop renewing the retired domain.
-    for name in (old['domain'], old['origin_ip']):
+    browser = old.get('browser_proxy', {})
+    retained = browser.get('certificate_name', browser.get('host', old['origin_ip'])) if browser.get('enabled') else None
+    for name in (value for value in (old['domain'], old['origin_ip']) if value != retained):
         if (provision.LETSENCRYPT/'renewal'/f'{name}.conf').exists():
             try:
                 run(CERTBOT, 'delete', '--non-interactive', '--cert-name', name)

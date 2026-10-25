@@ -29,6 +29,13 @@ class ProvisionTests(unittest.TestCase):
             cert=module.LETSENCRYPT/'live/proxy.example.com'
             module.write(cert/'fullchain.pem','fixture-certificate')
             module.write(cert/'privkey.pem','fixture-private-key',0o600)
+            config=module.read(module.ETC/'config.json')
+            config['browser_proxy']={'enabled':True,'host':'browser.example.com','port':443,
+                                     'fronted_by_xray':True,'certificate_name':'browser.example.com','internal_port':18080}
+            module.write(module.ETC/'config.json',config)
+            browser_cert=module.LETSENCRYPT/'live/browser.example.com'
+            module.write(browser_cert/'fullchain.pem','fixture-browser-certificate')
+            module.write(browser_cert/'privkey.pem','fixture-browser-private-key',0o600)
             with patch.object(module,'unit'),patch.object(module,'run'):
                 previous=os.umask(0o077)
                 try:module.activate()
@@ -40,6 +47,37 @@ class ProvisionTests(unittest.TestCase):
             self.assertEqual((module.CERTS/'domain/privkey.pem').stat().st_mode&0o777,0o640)
             config=json.loads((module.XRAY_ETC/'config.json').read_text())
             self.assertTrue(config['inbounds'][0]['streamSettings']['tlsSettings']['rejectUnknownSni'])
+            self.assertEqual(len(config['inbounds'][0]['streamSettings']['tlsSettings']['certificates']),2)
+            fallback=config['inbounds'][0]['settings']['fallbacks'][0]
+            self.assertEqual(fallback['name'],'browser.example.com')
+            self.assertEqual(fallback['dest'],'127.0.0.1:18080')
+            subprocess.run(['runuser','-u','xray','--','python3','-c',
+                            'from pathlib import Path;import sys;assert Path(sys.argv[1]).read_text()=="fixture-browser-private-key"',
+                            str(module.CERTS/'browser/privkey.pem')],check=True)
+
+    def test_browser_setup_repeat_keeps_credentials_and_wal_access(self):
+        spec=importlib.util.spec_from_file_location('isolated_browser_provision',ROOT/'deploy/provision.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='proxysub-browser-setup-') as folder:
+            root=Path(folder);module.ETC=root/'etc';module.LETSENCRYPT=root/'acme'
+            module.write(module.ETC/'config.json',{'domain':'proxy.example.com','origin_ip':'1.1.1.1',
+                         'data_dir':str(root/'data'),'acme_root':str(root/'webroot')})
+            cert=module.LETSENCRYPT/'live/browser.example.com'
+            module.write(cert/'fullchain.pem','fixture-certificate');module.write(cert/'privkey.pem','fixture-key')
+            units={}
+            def capture_unit(name,content):units[name]=content
+            with patch.object(module,'run'),patch.object(module,'unit',side_effect=capture_unit),patch.object(module,'activate'),\
+                 patch.object(module.socket,'getaddrinfo',return_value=[(2,1,6,'',('1.1.1.1',80))]),\
+                 patch.object(module.shutil,'which',return_value=None):
+                module.setup_browser_proxy('browser.example.com',443)
+                before=module.read(module.ETC/'config.json')['browser_proxy']
+                module.setup_browser_proxy()
+                after=module.read(module.ETC/'config.json')['browser_proxy']
+            self.assertEqual(before['secret'],after['secret'])
+            self.assertEqual(after['port'],443)
+            self.assertTrue(after['fronted_by_xray'])
+            self.assertIn('ProtectSystem=strict',units['proxy-browser.service'])
+            self.assertIn('ReadWritePaths='+str(root/'data'),units['proxy-browser.service'])
 
     def test_fresh_install_and_repeat_keep_state(self):
         spec=importlib.util.spec_from_file_location('isolated_provision',ROOT/'deploy/provision.py')

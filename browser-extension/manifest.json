@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "新加坡专线 · 分身代理",
+  "version": "1.0.0",
+  "description": "独立新加坡节点，全站网页代理；断开时锁住网页网络。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArJxWRrqhi6yTMt4okFBFp37iQEsrF0dVTatGGuf1Xd5uAmqR25FdkBgWNzyJitycUAqjfKrtEECxiznJvTXlpL/NwVEpU6l0uDIctFdlzgfFgR65e8k+jXlgYMa7jpLG/bE21Voj132tRYYcsX+Q1vDlAvfcoAcUuhMRA1utP+D6grcE6IpcMLQDjh57W2p7CkG5IXb++WeFAm1YS0GKm05mJf00JCkJpudYz9lV019swu6BV7YeSTvVqApQiDhH8fhkLtmVFQLyhDcudyMMM+cGUuYFwRDh2ehIHOuLDVPLwoe9pUrm3GNANgSBdJ/0eEGoGvB9nPmc2YYN3nz3WQIDAQAB",
+  "permissions": [
+    "proxy",
+    "privacy",
+    "storage",
+    "webRequest",
+    "webRequestAuthProvider",
+    "declarativeNetRequest",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "新加坡专线"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "lockdown",
+        "enabled": true,
+        "path": "lockdown.json"
+      }
+    ]
+  },
+  "incognito": "not_allowed"
+}

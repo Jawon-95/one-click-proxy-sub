@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 import generator
 import domain_control
+import browser_proxy
 import urllib.request
 
 import qrcode
@@ -72,6 +73,8 @@ def public_subscription(row):
 
 
 def payload(row, fmt):
+    if fmt == 'browser':
+        return json.dumps(browser_proxy.subscription(row, CONFIG), ensure_ascii=False).encode(), 'application/json; charset=utf-8'
     return generator.render(generator.get_snapshot(db), fmt, BASE + row['path'])
 
 
@@ -332,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.error(404, '订阅不存在')
                 if match[2] and method == 'GET':
                     fmt = query.get('target', query.get('format', ['auto']))[0]
-                    if fmt not in ('auto', 'raw', 'clash', 'surge', 'json', 'base64'):
+                    if fmt not in ('auto', 'raw', 'clash', 'surge', 'json', 'base64', 'browser'):
                         raise ValueError('不支持的二维码格式')
                     link = BASE + row['path'] + ('?target=' + fmt if fmt != 'auto' else '')
                     output = io.BytesIO()

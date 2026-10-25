@@ -2,13 +2,16 @@
 # ProxySub installer. Safe to run again; persistent configuration is retained.
 set -Eeuo pipefail
 umask 027
-VERSION=2.1.0
+VERSION=2.2.0
 XRAY_VERSION=26.3.27
 NODE_VERSION=22.23.4
 DOMAIN=
 ORIGIN_IP=
 PASSWORD_FILE=
 CHECK=0
+BROWSER_PROXY=0
+BROWSER_HOST=
+BROWSER_PORT=
 while (($#)); do
   case "$1" in
     --domain) DOMAIN=${2:?Missing domain}; shift 2 ;;
@@ -16,6 +19,9 @@ while (($#)); do
     --password-file) PASSWORD_FILE=${2:?Missing password file}; shift 2 ;;
     --upgrade) shift ;;
     --check) CHECK=1; shift ;;
+    --browser-proxy) BROWSER_PROXY=1; shift ;;
+    --browser-host) BROWSER_HOST=${2:?Missing browser hostname}; BROWSER_PROXY=1; shift 2 ;;
+    --browser-port) BROWSER_PORT=${2:?Missing browser port}; BROWSER_PROXY=1; shift 2 ;;
     --help|-h)
       cat <<'HELP'
 ProxySub 一键安装 / 升级
@@ -25,6 +31,9 @@ ProxySub 一键安装 / 升级
   sudo bash install.sh --check                 查看服务与证书续期状态
   --origin-ip IPv4                            手动指定服务器公网 IPv4
   --password-file /root/password.txt           从本地文件读取管理密码
+  --browser-proxy                             启用浏览器 HTTPS 代理
+  --browser-host origin.example.com            使用灰云域名作为浏览器入口
+  --browser-port 443                           共用 TLS 前端；也可指定独立端口
 HELP
       exit 0 ;;
     *) printf '未知参数：%s\n' "$1" >&2; exit 2 ;;
@@ -35,6 +44,10 @@ if ((CHECK)); then
   systemctl --no-pager --full status xray proxy-subscription proxy-domain-change.path
   systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer proxy-domain-change.path proxy-domain-change.service
   systemctl list-timers proxy-cert-renew.timer --no-pager
+  if [[ -f /etc/systemd/system/proxy-browser.service ]]; then
+    systemctl --no-pager --full status proxy-browser.service
+    systemctl is-enabled proxy-browser.service
+  fi
   exit 0
 fi
 [[ -d /run/systemd/system ]] || { echo '本工具需要使用 systemd 的 Linux 服务器。' >&2; exit 1; }
@@ -127,7 +140,7 @@ chmod 0644 /opt/xray/geoip.dat /opt/xray/geosite.dat
 echo '部署程序并初始化本地数据库…'
 install -d -m 0755 /opt/proxy-manager
 if [[ $(realpath "$SOURCE") != /opt/proxy-manager ]]; then
-  for folder in app config deploy docs; do
+  for folder in app config deploy docs browser-extension; do
     cp -a "$SOURCE/$folder" /opt/proxy-manager/
   done
   for file in install.sh requirements.txt VERSION README.md LICENSE THIRD_PARTY_NOTICES.md; do
@@ -147,6 +160,12 @@ echo '签发或检查域名 TLS 证书…'
 /opt/certbot/bin/certbot certonly --webroot -w /var/lib/proxy-acme -d "$DOMAIN" --cert-name "$DOMAIN" \
   --agree-tos --register-unsafely-without-email --non-interactive --keep-until-expiring
 /opt/proxy-web/bin/python /opt/proxy-manager/deploy/provision.py activate
+if ((BROWSER_PROXY)) || /opt/proxy-web/bin/python -c 'import json;from pathlib import Path;raise SystemExit(not json.loads(Path("/etc/proxy-manager/config.json").read_text()).get("browser_proxy",{}).get("enabled"))'; then
+  BROWSER_ARGS=(browser)
+  [[ -n $BROWSER_HOST ]] && BROWSER_ARGS+=(--browser-host "$BROWSER_HOST")
+  [[ -n $BROWSER_PORT ]] && BROWSER_ARGS+=(--browser-port "$BROWSER_PORT")
+  /opt/proxy-web/bin/python /opt/proxy-manager/deploy/provision.py "${BROWSER_ARGS[@]}"
+fi
 echo "安装完成： https://$DOMAIN"
 echo '打开域名，输入管理密码即可查看预置入口、订阅链接和二维码。'
 echo 'Cloudflare DNS 橙云开启后可使用优选入口；SSL/TLS 请选择完全（严格）。'

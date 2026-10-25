@@ -37,6 +37,8 @@ def enqueue(value, config):
     domain = normalize_domain(value)
     if domain == config['domain']:
         raise ValueError('新域名与当前域名相同。')
+    if config.get('browser_proxy', {}).get('enabled') and domain == config['browser_proxy'].get('host'):
+        raise ValueError('该域名正用于浏览器代理，请选择独立的管理域名。')
     if busy(config):
         raise ValueError('已有域名更换任务正在执行，请稍候。')
     request = {'id': secrets.token_hex(16), 'domain': domain, 'previousDomain': config['domain'], 'created': int(time.time())}
