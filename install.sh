@@ -2,7 +2,7 @@
 # ProxySub installer. Safe to run again; persistent configuration is retained.
 set -Eeuo pipefail
 umask 027
-VERSION=2.1.1
+VERSION=2.2.0
 XRAY_VERSION=26.3.27
 NODE_VERSION=22.23.4
 DOMAIN=
@@ -45,14 +45,14 @@ case "$ID" in
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip ca-certificates curl tar xz-utils unzip
     PYTHON=python3 ;;
-  opencloudos|rocky|almalinux|rhel|centos)
+  alinux|opencloudos|rocky|almalinux|rhel|centos)
     dnf install -y --setopt=install_weak_deps=False python3 python3-pip ca-certificates curl tar xz unzip
     PYTHON=python3
     if ! python3 -c 'import sys; assert sys.version_info >= (3,10)' 2>/dev/null; then
       dnf install -y python3.11 python3.11-pip
       PYTHON=python3.11
     fi ;;
-  *) echo '支持 Ubuntu 22.04+、Debian 12+、OpenCloudOS/Rocky/AlmaLinux 9。' >&2; exit 1 ;;
+  *) echo '支持 Ubuntu 22.04+、Debian 12+、阿里云 Linux 3、OpenCloudOS/Rocky/AlmaLinux 9。' >&2; exit 1 ;;
 esac
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3,10), "Python 3.10+ required"'
 
@@ -121,6 +121,8 @@ chmod 0755 /opt/xray /opt/xray/xray
 chmod 0644 /opt/xray/geoip.dat /opt/xray/geosite.dat
 "$PYTHON" -m venv /opt/proxy-web
 /opt/proxy-web/bin/pip install --disable-pip-version-check -q -r "$SOURCE/requirements.txt"
+# The non-root web service needs to traverse/read its runtime under umask 027.
+chmod -R o+rX /opt/proxy-web
 "$PYTHON" -m venv /opt/certbot
 /opt/certbot/bin/pip install --disable-pip-version-check -q 'certbot==5.8.0'
 

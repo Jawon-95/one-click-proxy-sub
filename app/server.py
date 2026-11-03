@@ -27,6 +27,9 @@ CONFIG_PATH = Path(os.environ.get('PROXY_CONFIG', '/etc/proxy-manager/config.jso
 CONFIG = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
 DATA = Path(CONFIG.get('data_dir', '/var/lib/proxy-manager'))
 ASSETS = Path(__file__).resolve().parent / 'web'
+PROJECT = Path(__file__).resolve().parent.parent
+VERSION = (PROJECT / 'VERSION').read_text(encoding='utf-8').strip()
+ENDPOINT_CATALOG = json.loads((PROJECT / 'config/regional-endpoints.json').read_text(encoding='utf-8'))
 ACME = Path(CONFIG.get('acme_root', '/var/lib/proxy-acme')) / '.well-known/acme-challenge'
 DOMAIN = CONFIG['domain']
 HOST = CONFIG['origin_ip']
@@ -278,7 +281,8 @@ class Handler(BaseHTTPRequestHandler):
             with db() as conn:
                 subscriptions = [public_subscription(r) for r in conn.execute('SELECT * FROM subscriptions ORDER BY created,id')]
             return self.reply(200, {'csrf': session['csrf'], 'domain': DOMAIN, 'origin_ip': HOST, 'base': BASE,
-                'subscriptions': subscriptions, 'domain_ready': True, 'version': '2.1.0',
+                'subscriptions': subscriptions, 'domain_ready': True, 'version': VERSION,
+                'endpointCatalog': ENDPOINT_CATALOG,
                 'domainChange': domain_control.status(CONFIG),
                 'generator': generator.public_state(generator.get_snapshot(db), CONFIG)})
         if path == '/api/domain' and method == 'GET':

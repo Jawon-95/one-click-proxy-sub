@@ -139,6 +139,21 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn(b'sourceSubscriptionUrl',html)
         self.request('/assets/../server.py',status=404)
 
+    def test_catalog_is_authenticated_and_does_not_modify_active_settings(self):
+        self.cookie=''
+        self.request('/api/state',status=401)
+        self.login()
+        _,before=self.request('/api/state')
+        self.assertEqual(before['version'],(ROOT/'VERSION').read_text().strip())
+        regions=before['endpointCatalog']['regions']
+        self.assertEqual([(r['id'],len(r['entries'])) for r in regions],[('sg',15),('ph',5)])
+        _,after=self.request('/api/state')
+        self.assertEqual(before['generator'],after['generator'])
+        self.assertEqual(before['subscriptions'],after['subscriptions'])
+        self.request('/assets/endpoint-presets.js')
+        self.request('/assets/../../config/regional-endpoints.json',status=404)
+        self.request('/api/logout','POST',{})
+
 
 if __name__=='__main__':
     unittest.main()

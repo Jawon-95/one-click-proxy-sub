@@ -30,6 +30,7 @@ class WorkerTests(unittest.TestCase):
             app=root/'app-source'
             shutil.copytree(ROOT/'app',app/'app',ignore=shutil.ignore_patterns('__pycache__'))
             shutil.copytree(ROOT/'config',app/'config')
+            shutil.copyfile(ROOT/'VERSION',app/'VERSION')
             for path in (app,*app.rglob('*')):path.chmod(0o755 if path.is_dir() else 0o644)
             data=root/'data';data.mkdir();owner=pwd.getpwnam('proxy-sub')
             etc=root/'etc';admin=root/'admin';admin.mkdir()

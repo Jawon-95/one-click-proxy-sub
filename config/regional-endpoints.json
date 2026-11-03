@@ -1,0 +1,46 @@
+{
+  "updatedAt": "2026-11-03",
+  "notice": "地区是候选来源或一次测试的接入位置，不是固定机房或速度保证。Cloudflare Anycast 会随客户端网络和时间改变路由；最终出口始终是你的服务器。",
+  "regions": [
+    {
+      "id": "sg",
+      "name": "新加坡",
+      "description": "完整保留用户提供并反馈较快的 15 个入口与原始备注。此列表未逐项独立复测，部分 IP 不属于 Cloudflare 公布的网段，可能无法转发；请在自己的客户端验证。",
+      "verification": "用户提供 · 未独立复测",
+      "entries": [
+        {"address": "www.visa.com.sg", "label": "Visa新加坡"},
+        {"address": "singapore.com", "label": "Singapore官方"},
+        {"address": "saas.sin.fan", "label": "SIN标识优选域名"},
+        {"address": "172.64.146.221", "label": "新加坡1"},
+        {"address": "172.64.149.163", "label": "新加坡2"},
+        {"address": "45.77.254.160", "label": "新加坡3"},
+        {"address": "34.143.159.175", "label": "新加坡4"},
+        {"address": "47.84.54.115", "label": "新加坡5"},
+        {"address": "158.178.230.113", "label": "新加坡6"},
+        {"address": "213.35.110.208", "label": "新加坡7"},
+        {"address": "164.52.2.98", "label": "新加坡8"},
+        {"address": "141.11.43.124", "label": "新加坡9"},
+        {"address": "47.84.113.241", "label": "新加坡10"},
+        {"address": "20.191.143.151", "label": "新加坡11"},
+        {"address": "138.2.64.175", "label": "新加坡12"}
+      ]
+    },
+    {
+      "id": "ph",
+      "name": "菲律宾",
+      "description": "2026-11-03 从菲律宾服务器测试：以下入口均通过自建服务的 TLS + WebSocket 代理出站验证，另一次 trace 采样显示 MNL（马尼拉）。这不是你的客户端测速结果，也不保证未来仍接入 MNL。域名和 IP 可能指向相同入口。",
+      "verification": "代理出站验证通过 · MNL 采样",
+      "entries": [
+        {"address": "www.visa.com.ph", "label": "Visa菲律宾", "source": "https://www.visa.com.ph/", "observedColo": "MNL"},
+        {"address": "visa.com.ph", "label": "Visa菲律宾根域", "source": "https://www.visa.com.ph/", "observedColo": "MNL"},
+        {"address": "104.18.29.76", "label": "菲律宾候选1-Visa", "source": "https://www.visa.com.ph/", "observedColo": "MNL"},
+        {"address": "162.159.152.2", "label": "菲律宾候选2-Visa根域", "source": "https://visa.com.ph/", "observedColo": "MNL"},
+        {"address": "162.159.153.2", "label": "菲律宾候选3-Visa根域", "source": "https://visa.com.ph/", "observedColo": "MNL"}
+      ]
+    }
+  ],
+  "sources": [
+    {"label": "候选来源、筛选和验证方法", "url": "https://github.com/Jawon-95/one-click-proxy-sub/blob/main/docs/REGIONAL_ENDPOINTS.md"},
+    {"label": "Cloudflare Anycast 与接入机房说明", "url": "https://developers.cloudflare.com/support/troubleshooting/general-troubleshooting/geographic-traffic-routing/"}
+  ]
+}

@@ -8,6 +8,8 @@ const PLATFORMS=[
   {key:'surge',name:'Surge',description:'macOS · iOS',icon:'surge'},
 ];
 let state,csrf='',selectedId,editing,dirty=false,toastTimer,domainJob,domainTimer,pendingDomain='';
+let catalogRegion='sg';
+const catalogSelected=new Set();
 const text=(tag,cls,value)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined)el.textContent=value;return el;};
 function notice(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 function errorAt(id,error){$(id).textContent=error?.message||'';$(id).hidden=!error;}
@@ -24,7 +26,7 @@ function selected(){return state?.subscriptions.find(r=>String(r.id)===String(se
 function urlFor(row,target='auto'){return row.url+(target!=='auto'?'?target='+target:'');}
 function qrFor(row,target='auto'){return '/api/subscriptions/'+row.id+'/qr?target='+target;}
 function date(value){return value?new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未更新';}
-function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';}
+function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';renderCatalog();}
 function renderOutput(){
   const row=selected();
   if(row){$('mainQr').src=qrFor(row);$('mainQr').hidden=false;$('mainUrl').value=row.url;}
@@ -57,6 +59,49 @@ function renderPreview(){
   $('formatWarning').hidden=!generator.warnings.length;$('formatWarning').textContent=generator.warnings.join('\n');
 }
 function action(label,fn,cls=''){const button=text('button',cls,label);button.type='button';button.addEventListener('click',()=>busy(button,fn));return button;}
+function currentCatalogRegion(){return state?.endpointCatalog?.regions.find(region=>region.id===catalogRegion);}
+function availableCatalogEntries(){
+  const existing=RegionalEndpoints.keys($('preferredIps').value);
+  return (currentCatalogRegion()?.entries||[]).filter(entry=>!existing.has(RegionalEndpoints.key(entry.address)));
+}
+function updateCatalogSelection(){
+  const available=availableCatalogEntries();
+  const count=available.filter(entry=>catalogSelected.has(RegionalEndpoints.key(entry.address))).length;
+  $('catalogAdd').disabled=!count;
+  $('catalogAdd').textContent='添加所选到编辑列表'+(count?'（'+count+'）':'');
+  $('catalogSelectAll').disabled=!available.length;
+  $('catalogSelectAll').checked=!!available.length&&count===available.length;
+  $('catalogSelectAll').indeterminate=count>0&&count<available.length;
+}
+function renderCatalog(){
+  const catalog=state?.endpointCatalog,region=currentCatalogRegion();
+  $('regionalCatalog').hidden=!region;
+  if(!region)return;
+  $('catalogNotice').textContent=catalog.notice;
+  $('catalogDescription').textContent=region.description;
+  $('catalogMeta').textContent=region.verification+' · 更新于 '+catalog.updatedAt;
+  const tabs=document.createDocumentFragment();
+  for(const item of catalog.regions){
+    const button=action(item.name+' · '+item.entries.length,()=>{catalogRegion=item.id;catalogSelected.clear();renderCatalog();},'button '+(item.id===region.id?'secondary':'quiet'));
+    button.setAttribute('aria-pressed',String(item.id===region.id));tabs.append(button);
+  }
+  $('catalogRegions').replaceChildren(tabs);
+  const existing=RegionalEndpoints.keys($('preferredIps').value),rows=document.createDocumentFragment();
+  for(const entry of region.entries){
+    const key=RegionalEndpoints.key(entry.address),included=existing.has(key),tr=text('tr');
+    const choice=text('td'),checkbox=text('input');checkbox.type='checkbox';checkbox.disabled=included;checkbox.checked=!included&&catalogSelected.has(key);
+    checkbox.setAttribute('aria-label',entry.label+' '+entry.address);
+    checkbox.addEventListener('change',()=>{if(checkbox.checked)catalogSelected.add(key);else catalogSelected.delete(key);updateCatalogSelection();});choice.append(checkbox);
+    const endpoint=text('td');endpoint.append(text('code','',entry.address),text('div','catalog-remark',entry.label));
+    const status=text('td');status.append(text('span',included?'enabled':'catalog-verification',included?'已在编辑列表':entry.observedColo?'MNL 采样 · 代理验证通过':'用户提供 · 待自测'));
+    if(entry.source){const link=text('a','catalog-source','来源 ↗');link.href=entry.source;link.target='_blank';link.rel='noopener noreferrer';status.append(link);}
+    tr.append(choice,endpoint,status);rows.append(tr);
+  }
+  $('catalogRows').replaceChildren(rows);
+  const sources=document.createDocumentFragment();
+  for(const source of catalog.sources){const link=text('a','',source.label+' ↗');link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';sources.append(link);}
+  $('catalogSources').replaceChildren(sources);updateCatalogSelection();
+}
 function renderLinks(){
   const enabled=state.subscriptions.filter(r=>r.enabled);
   if(!enabled.some(r=>String(r.id)===String(selectedId)))selectedId=(enabled.find(r=>r.path.startsWith('/subscribe/'))||enabled[0])?.id;
@@ -78,6 +123,23 @@ function openLink(row){editing=row||null;$('linkTitle').textContent=row?'编辑�
 function openDelete(row){$('deleteMessage').textContent='删除「'+row.name+'」后，这个地址将无法再更新订阅。此操作无法恢复。';$('deleteDialog').showModal();$('confirmDelete').onclick=()=>busy($('confirmDelete'),async()=>{await api('/api/subscriptions/'+row.id,'DELETE',{});$('deleteDialog').close();await reload();notice('链接已删除');});}
 $('loginForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{errorAt('loginError',null);try{const value=await api('/api/login','POST',{password:$('loginPassword').value});csrf=value.csrf;$('loginPassword').value='';await reload();}catch(error){errorAt('loginError',error);}});});
 $('preferredIps').addEventListener('input',markDirty);
+$('catalogSelectAll').addEventListener('change',()=>{
+  const checked=$('catalogSelectAll').checked;
+  for(const entry of availableCatalogEntries()){const key=RegionalEndpoints.key(entry.address);if(checked)catalogSelected.add(key);else catalogSelected.delete(key);}
+  renderCatalog();
+});
+$('catalogAdd').addEventListener('click',()=>{
+  const selected=availableCatalogEntries().filter(entry=>catalogSelected.has(RegionalEndpoints.key(entry.address)));
+  const result=RegionalEndpoints.merge($('preferredIps').value,selected);
+  $('preferredIps').value=result.value;catalogSelected.clear();markDirty();
+  const limit=$('nodeLimit').valueAsNumber;
+  const message='已添加 '+result.added+' 个地址到编辑列表，点击「保存并更新订阅」后生效。'+(limit>0?'当前只输出前 '+limit+' 个优选地址；新地址在末尾，请按需调整顺序或数量上限。':'');
+  $('catalogStatus').textContent=message;notice(message);
+});
+$('catalogCopy').addEventListener('click',()=>busy($('catalogCopy'),async()=>{
+  await navigator.clipboard.writeText(currentCatalogRegion().entries.map(entry=>entry.address+'#'+entry.label).join('\n'));
+  notice('已复制'+currentCatalogRegion().name+'候选列表');
+}));
 $('nodeLimit').addEventListener('input',markDirty);
 $('preferredForm').addEventListener('submit',event=>{event.preventDefault();busy($('saveButton'),async()=>{errorAt('saveError',null);try{await api('/api/generate','POST',{preferredIps:$('preferredIps').value,nodeLimit:$('nodeLimit').valueAsNumber});await reload();notice('已保存，所有订阅链接立即更新');}catch(error){errorAt('saveError',error);}});});
 $('restoreButton').addEventListener('click',()=>{$('preferredIps').value=state.generator.defaultPreferredIps;markDirty();notice('已填入预置地址，点击保存后生效');});
