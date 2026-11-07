@@ -15,7 +15,7 @@ async function busy(button,fn){button.disabled=true;try{await fn();}catch(error)
 async function copy(value){if(!value)return;await navigator.clipboard.writeText(value);notice('订阅链接已复制');}
 function selected(){return state?.subscriptions.find(r=>String(r.id)===String(selectedId)&&r.enabled);}
 function date(value){return value?new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未更新';}
-function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';renderCatalog();}
+function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';syncCatalog();}
 function renderOutput(){
   const row=selected(),format=$('formatSelect').value;
   const target=format==='cdn'?'raw':format;
@@ -43,54 +43,46 @@ function renderPreview(){
   $('formatWarning').hidden=!generator.warnings.length;$('formatWarning').textContent=generator.warnings.join('\n');
 }
 function action(label,fn,cls=''){const button=text('button',cls,label);button.type='button';button.addEventListener('click',()=>busy(button,fn));return button;}
+function syncCatalog(){
+  const existing=RegionalEndpoints.keys($('preferredIps').value);
+  for(const checkbox of $('catalogRegions').querySelectorAll('input[data-entry]')){
+    checkbox.checked=existing.has(checkbox.dataset.entry);
+    checkbox.closest('label').querySelector('.included').hidden=!checkbox.checked;
+  }
+}
 function renderCatalog(){
   const regions=state?.endpointCatalog?.regions||[];
   $('regionalCatalog').hidden=!regions.length;
-  const existing=RegionalEndpoints.keys($('preferredIps').value);
-  const selectedKeys=new Set([...$('catalogRegions').querySelectorAll('input[data-entry]:checked')].map(input=>input.dataset.entry));
   const cards=document.createDocumentFragment();
   for(const region of regions){
     const panel=text('section','region');
     panel.dataset.region=region.id;
     const header=text('div','section-title');
     const title=text('h3','',region.name+' · '+region.entries.length);
-    const selectable=[];
-    const add=action('添加所选',()=>{
-      const entries=selectable.filter(({input})=>input.checked).map(({entry})=>entry);
-      const result=RegionalEndpoints.merge($('preferredIps').value,entries);
-      $('preferredIps').value=result.value;
-      markDirty();
-      const limit=$('nodeLimit').valueAsNumber;
-      $('catalogStatus').textContent='已添加 '+result.added+' 个地址。'+(limit>0?' 新地址位于列表末尾，请检查数量上限。':'');
-      $('catalogStatus').hidden=false;
-    },'button secondary small');
     const copyList=action('复制',async()=>{
       await navigator.clipboard.writeText(region.entries.map(entry=>entry.address+'#'+entry.label).join('\n'));
       notice('已复制'+region.name+'候选列表');
     },'button quiet small');
-    const actions=text('div','form-actions');
-    actions.append(copyList,add);
-    header.append(title,actions);
+    header.append(title,copyList);
     const list=text('ul','region-list');
     list.setAttribute('aria-label',region.name+'候选入口');
     list.tabIndex=0;
     for(const entry of region.entries){
-      const key=RegionalEndpoints.key(entry.address),included=existing.has(key);
       const item=text('li'),label=text('label','region-entry'),input=text('input');
       input.type='checkbox';
-      input.dataset.entry=key;
-      input.disabled=included;
-      input.checked=!included&&selectedKeys.has(key);
-      if(!included)selectable.push({entry,input});
+      input.dataset.entry=RegionalEndpoints.key(entry.address);
+      input.setAttribute('aria-label',entry.address+' '+entry.label);
+      input.addEventListener('change',()=>{
+        const editor=$('preferredIps');
+        editor.value=input.checked?RegionalEndpoints.merge(editor.value,[entry]).value:
+          RegionalEndpoints.remove(editor.value,entry.address);
+        markDirty();
+      });
       const address=text('code','',entry.address),remark=text('span','muted',entry.label);
-      label.append(input,address,remark);
-      if(included)label.append(text('span','included','已加入'));
+      label.append(input,address,remark,text('span','included','已加入'));
       item.append(label);
       list.append(item);
     }
-    const update=()=>{add.disabled=!selectable.some(({input})=>input.checked);};
-    list.addEventListener('change',update);
-    update();
     panel.append(header,text('p','hint region-note',region.verification),list);
     cards.append(panel);
   }
@@ -137,8 +129,8 @@ async function reload({preserveDraft=false}={}){
   if(!keepDraft){
     $('preferredIps').value=state.generator.preferredIps;
     $('nodeLimit').value=state.generator.nodeLimit||0;
-    $('catalogStatus').hidden=true;
   }
+  renderCatalog();
   markDirty();
   renderDomain(state.domainChange);
   renderPreview();

@@ -52,6 +52,11 @@ assert.equal(api.merge(result.value,[{address:'162.159.152.2',label:'changed'}])
 assert.equal(api.merge('',[{address:'visa.com.ph',label:'first'}]).value,'visa.com.ph#first');
 assert.equal(api.keys('a.example#one,b.example#two;c.example:443#three').size,3);
 assert.equal(api.merge('untouched\n',[]).value,'untouched\n');
+assert.equal(api.remove(result.value,'104.18.29.76'),
+             original+'\n162.159.152.2#last');
+assert.equal(api.remove('a.example#one,visa.com.ph:443#custom;visa.com.ph#duplicate\nb.example#two',
+                        'VISA.COM.PH'),'a.example#one\nb.example#two');
+assert.equal(api.remove('visa.com.ph','visa.com.ph'),'');
 """
         result = subprocess.run(['node', '-e', script], cwd=ROOT, encoding='utf-8', capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -116,7 +116,7 @@ code { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; 
   gap: 8px;
 }
 .subscription-selectors select, .subscription-link input, .domain-row { margin-top: 4px; }
-.subscription-output { flex: 1; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(12px, 2vw, 24px); }
+.subscription-output { flex: 1; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: clamp(12px, 2vw, 24px); }
 .subscription-output img {
   --qr-size: clamp(136px, min(17vw, 31dvh), 256px);
   display: block;
@@ -165,7 +165,7 @@ dialog > * + *, dialog form > * + * { margin-top: 8px; }
 dialog label { display: block; }
 .close-dialog { color: var(--muted); border: 0; background: transparent; font-size: 22px; cursor: pointer; }
 .prefix-input { display: flex; align-items: center; gap: 6px; }
-.toast { position: fixed; bottom: 12px; right: 12px; max-width: calc(100vw - 24px); padding: 9px 12px; color: #ddfaf0; background: #223e39; border: 1px solid #3c6c62; border-radius: 7px; z-index: 5; }
+.toast { position: fixed; top: 12px; right: 12px; max-width: calc(100vw - 24px); padding: 9px 12px; color: #ddfaf0; background: #223e39; border: 1px solid #3c6c62; border-radius: 7px; z-index: 5; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (min-width: 1440px) {
   #preferredIps { font-size: 13px; }

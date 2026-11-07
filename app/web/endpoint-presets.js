@@ -9,6 +9,15 @@ const RegionalEndpoints=Object.freeze({
   keys(value){
     return new Set(String(value).split(/[\n,;]+/).map(line=>this.key(line)).filter(Boolean));
   },
+  remove(value,address){
+    const key=this.key(address),parts=value.split(/([\n,;]+)/),kept=[];
+    for(let i=0;i<parts.length;i+=2){
+      if(this.key(parts[i])===key)continue;
+      if(kept.length)kept.push(parts[i-1]);
+      kept.push(parts[i]);
+    }
+    return kept.join('');
+  },
   merge(value,entries){
     const existing=this.keys(value),added=[];
     for(const entry of entries){
