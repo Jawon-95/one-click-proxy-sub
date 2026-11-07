@@ -74,8 +74,9 @@ def public_subscription(row):
     return value
 
 
-def payload(row, fmt):
-    return generator.render(generator.get_snapshot(db), fmt, BASE + row['path'])
+def payload(row, fmt, *, cdn_only=False):
+    return generator.render(generator.get_snapshot(db), fmt, BASE + row['path'], CONFIG, CONFIG_PATH,
+                            cdn_only=cdn_only)
 
 
 def target_format(query, user_agent=''):
@@ -231,16 +232,28 @@ class Handler(BaseHTTPRequestHandler):
             if not mime:
                 return self.error(404, 'Not found')
             return self.reply(200, asset.read_bytes(), mime)
+        if method == 'GET' and path == '/_mux-ping':
+            return self.reply(204, b'', 'text/plain; charset=utf-8')
         if method == 'GET' and path.startswith(('/subscribe/', '/s/', '/sub/')):
+            cdn_only = query.get('cdn', [''])[0] == '1'
+            fmt = target_format(query, self.headers.get('User-Agent', ''))
             with db() as conn:
                 row = conn.execute('SELECT * FROM subscriptions WHERE path=? AND enabled=1', (path,)).fetchone()
                 if not row:
                     return self.error(404, '订阅不存在或已停用')
-                fmt = target_format(query, self.headers.get('User-Agent', ''))
-                body, mime = payload(row, fmt)
+                if fmt == 'xray-mux':
+                    number = query.get('node', [''])[0]
+                    if not re.fullmatch(r'[0-9]{3,4}', number):
+                        return self.error(400, '请选择订阅中现有的 CDN 节点编号。')
+                    body, mime = generator.xray_mux_profile(generator.get_snapshot(db), number, CONFIG)
+                else:
+                    body, mime = payload(row, fmt, cdn_only=cdn_only)
                 if self.command != 'HEAD':
                     conn.execute('UPDATE subscriptions SET hits=hits+1,last_access=? WHERE id=?', (int(time.time()), row['id']))
-            return self.reply(200, body, mime, {'profile-update-interval': '24', 'profile-title': 'Singapore Private', 'Vary': 'User-Agent'})
+            if fmt == 'xray-mux':
+                return self.reply(200, body, mime, {'Content-Disposition': f'attachment; filename="cdn-mux-{number}.json"'})
+            title = 'ProxySub CDN' if cdn_only else 'Singapore Private'
+            return self.reply(200, body, mime, {'profile-update-interval': '24', 'profile-title': title, 'Vary': 'User-Agent'})
         if not path.startswith('/api/'):
             return self.error(404, 'Not found')
         match = re.fullmatch(r'/api/domain-result/([a-f0-9]{32})', path)

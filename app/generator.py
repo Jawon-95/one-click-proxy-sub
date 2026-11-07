@@ -1,4 +1,5 @@
 """Compile on save, serve cached formats from SQLite without Node per request."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -6,7 +7,7 @@ import shutil
 import subprocess
 import threading
 import time
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 LOCK = threading.Lock()
 ROOT = Path(__file__).resolve().parent
@@ -77,8 +78,53 @@ def public_state(snapshot, config):
             'availableFormats': list(result['formats']), 'defaultPreferredIps': defaults(config)['preferredIps']}
 
 
-def render(snapshot, target, subscription_url):
+def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=False):
     output = snapshot['result']['formats'].get(target)
     if not output:
         raise ValueError('该基础节点暂不支持此客户端格式。')
-    return output['body'].replace('__SUBSCRIPTION_URL__', subscription_url+'?target=surge').encode('utf-8'), output['contentType']
+    body = output['body'].replace('__SUBSCRIPTION_URL__', subscription_url+'?target=surge').encode('utf-8')
+    if target not in ('raw', 'plain'):
+        if cdn_only:
+            raise ValueError('仅 CDN 订阅支持 v2rayN 和纯文本格式。')
+        return body, output['contentType']
+    if cdn_only:
+        nodes = base64.b64decode(body) if target == 'raw' else body
+        body = b''.join(line for line in nodes.splitlines(keepends=True)
+                        if urlsplit(line.decode('utf-8')).hostname != config['origin_ip'])
+    else:
+        try:
+            direct = json.loads(config_path.with_name('hysteria2.json').read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return body, output['contentType']
+        auth = quote(direct['password'], safe='')
+        query = urlencode({'sni': config['domain']})
+        name = quote('000 | Hysteria 2 直连', safe='')
+        node = f'hysteria2://{auth}@{config["origin_ip"]}:{direct["port"]}/?{query}#{name}\n'.encode('utf-8')
+        body = node + (base64.b64decode(body) if target == 'raw' else body)
+    return (base64.b64encode(body) if target == 'raw' else body), output['contentType']
+
+
+def xray_mux_profile(snapshot, node_number, config):
+    for line in snapshot['result']['formats']['plain']['body'].splitlines():
+        node = urlsplit(line)
+        number = unquote(node.fragment).partition(' | ')[0]
+        if number == node_number and node.hostname != config['origin_ip']:
+            break
+    else:
+        raise ValueError('请选择订阅中现有的 CDN 节点编号。')
+    domain = config['domain']
+    profile = {
+        'log': {'loglevel': 'warning'},
+        'inbounds': [{'listen': '127.0.0.1', 'port': 10809, 'protocol': 'mixed'}],
+        'outbounds': [{
+            'tag': 'proxy', 'protocol': 'trojan',
+            'settings': {'servers': [{'address': node.hostname, 'port': node.port,
+                                      'password': config['node_password']}]},
+            'streamSettings': {'network': 'ws', 'security': 'tls', 'tlsSettings': {'serverName': domain},
+                               'wsSettings': {'path': config.get('ws_path', '/connect'), 'host': domain}},
+            'mux': {'enabled': True, 'concurrency': 8, 'xudpConcurrency': -1},
+        }],
+        'observatory': {'subjectSelector': ['proxy'], 'probeUrl': f'https://{domain}/_mux-ping',
+                        'probeInterval': '8s'},
+    }
+    return json.dumps(profile, indent=2).encode('utf-8'), 'application/json; charset=utf-8'

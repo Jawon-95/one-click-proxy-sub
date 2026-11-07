@@ -139,6 +139,39 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn(b'sourceSubscriptionUrl',html)
         self.request('/assets/../server.py',status=404)
 
+    def test_v2rayn_direct_hysteria_and_cdn_only_subscriptions(self):
+        path = '/subscribe/main'
+        _, original = self.request(path+'?target=plain')
+        _, cdn = self.request(path+'?target=plain&cdn=1')
+        self.assertNotIn(b'@203.0.113.10:', cdn)
+        self.assertEqual(cdn.splitlines(), original.splitlines()[1:])
+        state = self.server.CONFIG_PATH.with_name('hysteria2.json')
+        state.write_text(json.dumps({'port': 8443, 'password': 'fixture+auth'}), encoding='utf-8')
+        try:
+            _, raw = self.request(path+'?target=v2rayn')
+            head, remaining = base64.b64decode(raw).split(b'\n', 1)
+            self.assertTrue(head.startswith(b'hysteria2://fixture%2Bauth@203.0.113.10:8443/?sni=proxy.example.com#'))
+            self.assertEqual(remaining.splitlines(), original.splitlines())
+            _, filtered = self.request(path+'?target=v2rayn&cdn=1')
+            self.assertEqual(base64.b64decode(filtered).splitlines(), cdn.splitlines())
+        finally:
+            state.unlink()
+
+    def test_xray_mux_profile_uses_selected_cdn_node_and_ping(self):
+        path = '/subscribe/main?target=xray-mux&node='
+        self.request(path+'001', status=400)
+        self.request(path+'999', status=400)
+        self.request(path+'invalid', status=400)
+        response, config = self.request(path+'002')
+        self.assertIn('cdn-mux-002.json', response.headers['Content-Disposition'])
+        outbound = config['outbounds'][0]
+        self.assertEqual(outbound['settings']['servers'][0]['address'], 'proxy.example.com')
+        self.assertTrue(outbound['mux']['enabled'])
+        self.assertEqual(outbound['streamSettings']['wsSettings']['path'], '/connect')
+        self.assertEqual(config['observatory']['probeUrl'], 'https://proxy.example.com/_mux-ping')
+        _, body = self.request('/_mux-ping', status=204)
+        self.assertEqual(body, b'')
+
     def test_catalog_is_authenticated_and_does_not_modify_active_settings(self):
         self.cookie=''
         self.request('/api/state',status=401)

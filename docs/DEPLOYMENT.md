@@ -81,7 +81,34 @@ sudo bash install.sh --domain proxy.example.com --origin-ip YOUR_PUBLIC_IPV4 --p
 
 ## 直连节点
 
-订阅中的第一个节点名称带「直连」，地址是安装时记录的服务器公网 IPv4（`/etc/proxy-manager/config.json` 的 `origin_ip`），端口 443，SNI/Host 仍是管理域名，流量不经过 Cloudflare。它依赖服务器 IP 本身的线路质量，IP 被封锁或线路拥堵时请改用下方的 CDN 节点。更换服务器 IP 后需用 `--origin-ip` 重新执行安装器。
+`001 | 直连` 使用安装时记录的服务器公网 IPv4（`/etc/proxy-manager/config.json` 的 `origin_ip`），端口 443，SNI/Host 使用管理域名，流量不经过 Cloudflare。它依赖服务器 IP 本身的线路质量，IP 被封锁或线路拥堵时请改用 CDN 节点。更换服务器 IP 后需用 `--origin-ip` 重新执行安装器。
+
+### 可选的 Hysteria 2 直连
+
+完成安装后，可以在源站并行开启 Hysteria 2。默认使用 UDP 443，与现有 TCP 443 服务共用域名证书。请在云安全组和主机防火墙允许对应的入站 UDP 端口。
+
+```bash
+sudo /opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py enable
+sudo systemctl status proxy-hysteria2
+```
+
+刷新 v2rayN 的原订阅后，会出现 `000 | Hysteria 2 直连`。该节点也出现在纯文本订阅中。现有 `001 | 直连` 及优选列表继续使用 Trojan + WebSocket，普通 Cloudflare 橙云无法转发 Hysteria 2 UDP 会话。客户端连接源站 IP，并用管理域名验证证书。需要更换监听端口时，启用命令可加 `--port 8443`。
+
+可用 `enable --no-publish` 先启动测试入口，等客户端验证外网 UDP 可用后再运行 `enable` 将节点加入订阅。
+
+如需撤回，执行以下命令。客户端刷新订阅后会移除 Hysteria 2 节点。
+
+```bash
+sudo /opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py disable
+```
+
+### 仅 CDN 订阅与连接复用
+
+v2rayN 订阅地址可加 `?target=v2rayn&cdn=1`。订阅保留自动入口和自定义优选地址，并剔除使用源站 IP 的条目及 Hysteria 2 直连。请使用 Cloudflare 的代理入口，避免把指向源站的其他域名加入优选列表。
+
+使用 Xray 核心的 v2rayN 可在 Trojan 节点编辑窗口开启「启用 Mux 多路复用」。多个网站的新连接可以共用一条 WebSocket 隧道，网站自身的 HTTPS 握手仍按需进行。Mux 是客户端设置，标准 Trojan 订阅链接负责提供节点参数。
+
+需要在空闲时维持隧道，可以用 `?target=xray-mux&node=007` 下载当前订阅中 `007` 的 Xray 配置，把编号换成所选 CDN 节点编号即可。以 Xray 自定义配置导入 v2rayN，默认在本机 `127.0.0.1:10809` 监听，后台每约 8 秒经所选节点向管理域名的 `/_mux-ping` 发起一次轻量请求。自定义文件含代理凭据，请私下保存。优选列表变更后，使用订阅中的最新编号重新下载。
 
 ## 地区候选库
 
