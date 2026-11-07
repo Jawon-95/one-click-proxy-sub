@@ -104,16 +104,25 @@ def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=
     return (base64.b64encode(body) if target == 'raw' else body), output['contentType']
 
 
-def xray_mux_profile(snapshot, node_number, config):
+def xray_mux_profiles(snapshot, config, node_number=None):
+    profiles = []
     for line in snapshot['result']['formats']['plain']['body'].splitlines():
         node = urlsplit(line)
-        number = unquote(node.fragment).partition(' | ')[0]
-        if number == node_number and node.hostname != config['origin_ip']:
-            break
-    else:
+        if node.hostname == config['origin_ip']:
+            continue
+        name = unquote(node.fragment)
+        if node_number is None or name.partition(' | ')[0] == node_number:
+            profiles.append(xray_mux_profile(node, name, config))
+    if node_number is not None and not profiles:
         raise ValueError('请选择订阅中现有的 CDN 节点编号。')
+    result = profiles[0] if node_number is not None else profiles
+    return json.dumps(result, ensure_ascii=False).encode('utf-8'), 'application/json; charset=utf-8'
+
+
+def xray_mux_profile(node, name, config):
     domain = config['domain']
-    profile = {
+    return {
+        'remarks': name,
         'log': {'loglevel': 'warning'},
         'inbounds': [{'listen': '127.0.0.1', 'port': 10809, 'protocol': 'mixed'}],
         'outbounds': [{
@@ -127,4 +136,3 @@ def xray_mux_profile(snapshot, node_number, config):
         'observatory': {'subjectSelector': ['proxy'], 'probeUrl': f'https://{domain}/_mux-ping',
                         'probeInterval': '8s'},
     }
-    return json.dumps(profile, indent=2).encode('utf-8'), 'application/json; charset=utf-8'

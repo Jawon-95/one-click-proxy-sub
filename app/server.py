@@ -245,14 +245,16 @@ class Handler(BaseHTTPRequestHandler):
                     number = query.get('node', [''])[0]
                     if not re.fullmatch(r'[0-9]{3,4}', number):
                         return self.error(400, '请选择订阅中现有的 CDN 节点编号。')
-                    body, mime = generator.xray_mux_profile(generator.get_snapshot(db), number, CONFIG)
+                    body, mime = generator.xray_mux_profiles(generator.get_snapshot(db), CONFIG, number)
+                elif fmt == 'v2rayn-mux':
+                    body, mime = generator.xray_mux_profiles(generator.get_snapshot(db), CONFIG)
                 else:
                     body, mime = payload(row, fmt, cdn_only=cdn_only)
                 if self.command != 'HEAD':
                     conn.execute('UPDATE subscriptions SET hits=hits+1,last_access=? WHERE id=?', (int(time.time()), row['id']))
             if fmt == 'xray-mux':
                 return self.reply(200, body, mime, {'Content-Disposition': f'attachment; filename="cdn-mux-{number}.json"'})
-            title = 'ProxySub CDN' if cdn_only else 'Singapore Private'
+            title = 'ProxySub CDN Mux' if fmt == 'v2rayn-mux' else 'ProxySub CDN' if cdn_only else 'Singapore Private'
             return self.reply(200, body, mime, {'profile-update-interval': '24', 'profile-title': title, 'Vary': 'User-Agent'})
         if not path.startswith('/api/'):
             return self.error(404, 'Not found')

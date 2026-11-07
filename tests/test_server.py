@@ -171,6 +171,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(config['observatory']['probeUrl'], 'https://proxy.example.com/_mux-ping')
         _, body = self.request('/_mux-ping', status=204)
         self.assertEqual(body, b'')
+        _, profiles = self.request('/subscribe/main?target=v2rayn-mux')
+        _, cdn = self.request('/subscribe/main?target=plain&cdn=1')
+        self.assertEqual(len(profiles), len(cdn.splitlines()))
+        self.assertEqual(profiles[0], config)
+        self.assertTrue(all(item['outbounds'][0]['mux']['enabled'] and item['remarks'] for item in profiles))
 
     def test_catalog_is_authenticated_and_does_not_modify_active_settings(self):
         self.cookie=''
