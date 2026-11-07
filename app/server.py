@@ -232,8 +232,6 @@ class Handler(BaseHTTPRequestHandler):
             if not mime:
                 return self.error(404, 'Not found')
             return self.reply(200, asset.read_bytes(), mime)
-        if method == 'GET' and path == '/_mux-ping':
-            return self.reply(204, b'', 'text/plain; charset=utf-8')
         if method == 'GET' and path.startswith(('/subscribe/', '/s/', '/sub/')):
             cdn_only = query.get('cdn', [''])[0] == '1'
             fmt = target_format(query, self.headers.get('User-Agent', ''))
@@ -241,20 +239,12 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute('SELECT * FROM subscriptions WHERE path=? AND enabled=1', (path,)).fetchone()
                 if not row:
                     return self.error(404, '订阅不存在或已停用')
-                if fmt == 'xray-mux':
-                    number = query.get('node', [''])[0]
-                    if not re.fullmatch(r'[0-9]{3,4}', number):
-                        return self.error(400, '请选择订阅中现有的 CDN 节点编号。')
-                    body, mime = generator.xray_mux_profiles(generator.get_snapshot(db), CONFIG, number)
-                elif fmt == 'v2rayn-mux':
-                    body, mime = generator.xray_mux_profiles(generator.get_snapshot(db), CONFIG)
-                else:
-                    body, mime = payload(row, fmt, cdn_only=cdn_only)
+                if fmt in ('xray-mux', 'v2rayn-mux'):
+                    return self.error(410, 'WebSocket 长连接订阅已停用，请在管理面板复制标准订阅。')
+                body, mime = payload(row, fmt, cdn_only=cdn_only)
                 if self.command != 'HEAD':
                     conn.execute('UPDATE subscriptions SET hits=hits+1,last_access=? WHERE id=?', (int(time.time()), row['id']))
-            if fmt == 'xray-mux':
-                return self.reply(200, body, mime, {'Content-Disposition': f'attachment; filename="cdn-mux-{number}.json"'})
-            title = 'ProxySub CDN Mux' if fmt == 'v2rayn-mux' else 'ProxySub CDN' if cdn_only else 'Singapore Private'
+            title = 'ProxySub CDN' if cdn_only else 'ProxySub'
             return self.reply(200, body, mime, {'profile-update-interval': '24', 'profile-title': title, 'Vary': 'User-Agent'})
         if not path.startswith('/api/'):
             return self.error(404, 'Not found')
@@ -353,7 +343,12 @@ class Handler(BaseHTTPRequestHandler):
                     fmt = query.get('target', query.get('format', ['auto']))[0]
                     if fmt not in ('auto', 'raw', 'clash', 'surge', 'json', 'base64'):
                         raise ValueError('不支持的二维码格式')
-                    link = BASE + row['path'] + ('?target=' + fmt if fmt != 'auto' else '')
+                    options = {'target': fmt} if fmt != 'auto' else {}
+                    if query.get('cdn') == ['1']:
+                        if fmt not in ('raw', 'base64'):
+                            raise ValueError('仅 CDN 二维码支持通用节点链接格式')
+                        options['cdn'] = '1'
+                    link = BASE + row['path'] + ('?' + urllib.parse.urlencode(options) if options else '')
                     output = io.BytesIO()
                     qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage, border=4).save(output)
                     return self.reply(200, output.getvalue(), 'image/svg+xml')

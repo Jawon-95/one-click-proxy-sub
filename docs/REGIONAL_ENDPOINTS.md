@@ -1,6 +1,6 @@
 # 地区候选入口
 
-面板「按地区挑选候选入口」的数据来自版本库中的 [`config/regional-endpoints.json`](../config/regional-endpoints.json)，不依赖某台服务器的 SQLite 数据库。新装、迁移和更新都会带上此列表。
+工作台「地区候选」的数据来自版本库中的 [`config/regional-endpoints.json`](../config/regional-endpoints.json)，新装、迁移和更新时随项目部署。
 
 ## 使用
 

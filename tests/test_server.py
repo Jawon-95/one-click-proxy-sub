@@ -157,25 +157,10 @@ class ServerTests(unittest.TestCase):
         finally:
             state.unlink()
 
-    def test_xray_mux_profile_uses_selected_cdn_node_and_ping(self):
-        path = '/subscribe/main?target=xray-mux&node='
-        self.request(path+'001', status=400)
-        self.request(path+'999', status=400)
-        self.request(path+'invalid', status=400)
-        response, config = self.request(path+'002')
-        self.assertIn('cdn-mux-002.json', response.headers['Content-Disposition'])
-        outbound = config['outbounds'][0]
-        self.assertEqual(outbound['settings']['servers'][0]['address'], 'proxy.example.com')
-        self.assertTrue(outbound['mux']['enabled'])
-        self.assertEqual(outbound['streamSettings']['wsSettings']['path'], '/connect')
-        self.assertEqual(config['observatory']['probeUrl'], 'https://proxy.example.com/_mux-ping')
-        _, body = self.request('/_mux-ping', status=204)
-        self.assertEqual(body, b'')
-        _, profiles = self.request('/subscribe/main?target=v2rayn-mux')
-        _, cdn = self.request('/subscribe/main?target=plain&cdn=1')
-        self.assertEqual(len(profiles), len(cdn.splitlines()))
-        self.assertEqual(profiles[0], config)
-        self.assertTrue(all(item['outbounds'][0]['mux']['enabled'] and item['remarks'] for item in profiles))
+    def test_retired_websocket_keepalive_subscriptions(self):
+        self.request('/subscribe/main?target=v2rayn-mux', status=410)
+        self.request('/subscribe/main?target=xray-mux&node=002', status=410)
+        self.request('/_mux-ping', status=404)
 
     def test_catalog_is_authenticated_and_does_not_modify_active_settings(self):
         self.cookie=''

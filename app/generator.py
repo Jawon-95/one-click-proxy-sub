@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import threading
 import time
-from urllib.parse import quote, unquote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 LOCK = threading.Lock()
 ROOT = Path(__file__).resolve().parent
@@ -102,37 +102,3 @@ def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=
         node = f'hysteria2://{auth}@{config["origin_ip"]}:{direct["port"]}/?{query}#{name}\n'.encode('utf-8')
         body = node + (base64.b64decode(body) if target == 'raw' else body)
     return (base64.b64encode(body) if target == 'raw' else body), output['contentType']
-
-
-def xray_mux_profiles(snapshot, config, node_number=None):
-    profiles = []
-    for line in snapshot['result']['formats']['plain']['body'].splitlines():
-        node = urlsplit(line)
-        if node.hostname == config['origin_ip']:
-            continue
-        name = unquote(node.fragment)
-        if node_number is None or name.partition(' | ')[0] == node_number:
-            profiles.append(xray_mux_profile(node, name, config))
-    if node_number is not None and not profiles:
-        raise ValueError('请选择订阅中现有的 CDN 节点编号。')
-    result = profiles[0] if node_number is not None else profiles
-    return json.dumps(result, ensure_ascii=False).encode('utf-8'), 'application/json; charset=utf-8'
-
-
-def xray_mux_profile(node, name, config):
-    domain = config['domain']
-    return {
-        'remarks': name,
-        'log': {'loglevel': 'warning'},
-        'inbounds': [{'listen': '127.0.0.1', 'port': 10809, 'protocol': 'mixed'}],
-        'outbounds': [{
-            'tag': 'proxy', 'protocol': 'trojan',
-            'settings': {'servers': [{'address': node.hostname, 'port': node.port,
-                                      'password': config['node_password']}]},
-            'streamSettings': {'network': 'ws', 'security': 'tls', 'tlsSettings': {'serverName': domain},
-                               'wsSettings': {'path': config.get('ws_path', '/connect'), 'host': domain}},
-            'mux': {'enabled': True, 'concurrency': 8, 'xudpConcurrency': -1},
-        }],
-        'observatory': {'subjectSelector': ['proxy'], 'probeUrl': f'https://{domain}/_mux-ping',
-                        'probeInterval': '8s'},
-    }

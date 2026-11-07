@@ -1,32 +1,160 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="color-scheme" content="dark"><title>优选 IP 订阅管理 · ProxySub</title><link rel="icon" href="/assets/icons/auto.svg" type="image/svg+xml"><link rel="stylesheet" href="/assets/styles.css"><script src="/assets/endpoint-presets.js" defer></script><script src="/assets/app.js" defer></script></head>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="dark">
+  <title>ProxySub 管理面板</title>
+  <link rel="icon" href="/assets/icons/auto.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/endpoint-presets.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
 <body>
-<main id="loginScreen" class="login-screen"><form id="loginForm" class="login-card card"><img class="logo" src="/assets/icons/auto.svg" alt="ProxySub"><span class="eyebrow">ONE-CLICK PROXY SUB</span><h1>连接，由你选择。</h1><p class="muted">输入管理密码，管理你的 Cloudflare 优选入口。</p><label for="loginPassword">管理密码</label><input id="loginPassword" type="password" autocomplete="current-password" required autofocus><p class="hint">在自己的设备上，登录状态会保留 30 天。</p><p id="loginError" class="message error" role="alert" hidden></p><button class="button primary wide" type="submit">进入管理面板 <span>↗</span></button></form></main>
-<main id="appShell" class="container" hidden>
-  <header class="topbar"><a class="brand" href="#"><img src="/assets/icons/auto.svg" alt=""><span>ProxySub<small>PRIVATE CONNECTIONS</small></span></a><div class="top-actions"><span id="domainBadge" class="badge"></span><button id="securityButton" class="button quiet" type="button">修改密码</button><button id="logoutButton" class="button quiet" type="button">退出</button></div></header>
-  <section class="hero card"><div><p class="eyebrow">YOUR SERVER. MORE WAYS TO CONNECT.</p><h1>一个订阅，更多连接选择。</h1><p class="lead">编辑优选 IP 和域名，保存后在客户端更新订阅。<br>节点参数已自动配置，每个入口都连接到你的自建服务。</p><div class="hero-tags"><span>◈ 本地存储</span><span>◇ TLS 加密</span><span>↻ 自动启动</span></div></div><div class="hero-stats"><div><strong id="nodeCount">—</strong><span>可选节点</span></div><div><strong id="endpointCount">—</strong><span>优选入口</span></div></div></section>
-  <div class="editor-grid">
-    <section class="card editor"><div class="section-title"><div><p class="eyebrow">01 / PREFERRED ENDPOINTS</p><h2>你的优选入口</h2></div><span id="editStatus" class="badge subtle">已保存</span></div><p class="muted compact">列表已预置，可以直接使用，也可以按自己的网络情况调整。</p><form id="preferredForm"><label class="visually-hidden" for="preferredIps">优选 IP 或域名列表</label><textarea id="preferredIps" rows="15" spellcheck="false" required placeholder="104.16.1.2#我的优选入口&#10;example.com:443#域名备注"></textarea><div class="editor-hint"><span id="lineCount">— 个地址</span><span>每行一个地址，# 后可写备注</span></div><div class="node-limit"><label for="nodeLimit">订阅节点数量</label><input id="nodeLimit" type="number" min="0" max="1000" step="1" value="0" required inputmode="numeric"><p class="hint">0 = 全部（包含自动入口）。例如填 100，只返回列表前 100 个优选地址的节点，不删除其余地址。</p></div><p id="saveError" class="message error" role="alert" hidden></p><div class="form-actions"><button id="saveButton" class="button primary" type="submit">保存并更新订阅 <span>↗</span></button><button id="restoreButton" class="button secondary" type="button">恢复预置</button></div></form><p id="saveStatus" class="hint" role="status">保存后，现有订阅链接保持不变。</p><div class="tool-link"><div class="tool-icon">⌁</div><div><strong>想寻找适合自己网络的优选 IP？</strong><p>使用 CloudflareSpeedTest 测试延迟与下载速度。</p></div><a class="button quiet" href="https://github.com/XIU2/CloudflareSpeedTest" target="_blank" rel="noopener noreferrer">获取测速工具 ↗</a></div></section>
-    <aside class="card quick-sub"><p class="eyebrow">02 / SCAN & CONNECT</p><h2>扫码，立即订阅。</h2><p class="muted compact">使用客户端的「扫一扫」添加通用订阅。</p><div class="main-qr"><img id="mainQr" alt="通用订阅二维码" width="230" height="230"></div><div class="subscription-picker"><label for="subscriptionSelect">当前订阅链接</label><select id="subscriptionSelect"></select></div><div class="copy-row"><input id="mainUrl" readonly aria-label="通用订阅地址"><button id="copyMain" class="button secondary" type="button">复制</button></div><div class="quick-actions"><button id="createRandom" class="button quiet" type="button">＋ 生成新的订阅链接</button><button id="createCustom" class="button quiet" type="button">自定义易记路径</button></div><p class="hint">二维码只包含订阅地址，在本机客户端内扫码即可。<br>不同入口的实际速度，请在你的设备上测试。</p></aside>
-  </div>
-  <section id="regionalCatalog" class="card regional-catalog" aria-labelledby="catalogTitle" hidden>
-    <div class="section-title"><div><p class="eyebrow">REGIONAL CANDIDATES</p><h2 id="catalogTitle">按地区挑选候选入口</h2></div><span class="badge subtle">内置列表 · 自由添加</span></div>
-    <p class="muted compact">这些候选随项目一起保留。选择后添加到上方编辑列表，再保存即可加入订阅；不会覆盖你已有的地址和备注。</p>
-    <div id="catalogRegions" class="catalog-regions" role="group" aria-label="候选地区"></div>
-    <p id="catalogDescription" class="catalog-description"></p><p id="catalogMeta" class="hint"></p>
-    <div class="catalog-toolbar"><label class="catalog-select"><input id="catalogSelectAll" type="checkbox">全选可添加地址</label><button id="catalogCopy" class="button quiet" type="button">复制本地区全部候选</button></div>
-    <div class="table-wrap catalog-table"><table><thead><tr><th scope="col">选择</th><th scope="col">入口 / 原始备注</th><th scope="col">验证情况</th></tr></thead><tbody id="catalogRows"></tbody></table></div>
-    <div class="form-actions"><button id="catalogAdd" class="button secondary" type="button" disabled>添加所选到编辑列表</button></div>
-    <p id="catalogStatus" class="hint" role="status">只添加你选中的地址，已有地址自动跳过。真正加入订阅需要点击上方的「保存并更新订阅」。</p>
-    <p id="catalogNotice" class="hint"></p><div id="catalogSources" class="catalog-sources"></div>
-  </section>
-  <section id="results" class="results"><div class="section-heading"><div><p class="eyebrow">03 / SUBSCRIBE YOUR WAY</p><h2>每个平台，都有合适的订阅。</h2><p class="muted compact">这些链接提供同一批节点；保存优选地址后，在各客户端更新订阅即可。</p></div><span class="badge" id="resultCount">— 个节点</span></div><div id="platformCards" class="platform-grid"></div><p id="formatWarning" class="message warning" hidden></p></section>
-  <section class="card preview-section"><div class="section-title"><div><p class="eyebrow">NODE PREVIEW</p><h2>生成节点预览</h2></div><span id="previewCount" class="badge subtle"></span></div><div class="table-wrap"><table><thead><tr><th>节点名称</th><th>连接入口</th><th>端口</th><th>传输</th></tr></thead><tbody id="previewRows"></tbody></table></div><p class="hint">同一 Cloudflare IP 也可能接入相同机房；域名备注是标签，最终出口仍是你的服务器。</p></section>
-  <section class="card links-section"><div class="section-title"><div><p class="eyebrow">SUBSCRIPTION LINKS</p><h2>订阅链接管理</h2></div><span id="linkCount" class="badge subtle"></span></div><div class="table-wrap"><table><thead><tr><th>名称 / 路径</th><th>最近更新</th><th>状态</th><th>操作</th></tr></thead><tbody id="linkRows"></tbody></table></div><p class="hint">所有有效链接都会返回当前这批节点。停用或删除仅阻止订阅更新，已导入的节点仍可使用。</p></section>
-  <section class="card domain-settings"><p class="eyebrow">YOUR DOMAIN</p><h2>更换管理和订阅域名</h2><p class="muted compact">先将新域名的 A 记录指向本服务器，确保 HTTP 80 端口可访问。首次申请证书建议暂时使用灰云。</p><form id="domainForm"><label for="newDomain">新域名</label><div class="domain-row"><input id="newDomain" type="text" placeholder="proxy.example.com" maxlength="253" autocomplete="off" autocapitalize="none" spellcheck="false" required><button id="domainButton" class="button secondary" type="submit">更换域名</button></div><p class="hint">证书申请成功后自动切换。旧域名、旧订阅地址和旧节点会失效；在新域名使用原密码登录并重新导入订阅。</p></form><p id="domainStatus" class="hint" role="status"></p><p id="domainError" class="message error" role="alert" hidden></p><a id="newDomainLink" class="button secondary" hidden>打开新域名 ↗</a></section>
-  <section class="connection-note card"><div><span class="eyebrow">CLOUDFLARE</span><h3>开启橙云，使用优选入口。</h3><p>Cloudflare DNS 开启代理后，这些优选入口才可转发到你的域名。SSL/TLS 使用「完全（严格）」；分流规则由客户端自行管理。</p></div><div><button id="checkConnection" class="button secondary" type="button">检测访问方式</button><span id="connectionStatus" class="hint"></span></div></section>
-  <footer><span>ProxySub <span id="versionText">v2.2.0</span> · 自托管订阅管理</span><a href="https://github.com/Jawon-95/one-click-proxy-sub" target="_blank" rel="noopener noreferrer">开源项目 ↗</a></footer>
+<main id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card card">
+    <h1>ProxySub 登录</h1>
+    <label for="loginPassword">管理密码</label>
+    <input id="loginPassword" type="password" autocomplete="current-password" required autofocus>
+    <p id="loginError" class="message error" role="alert" hidden></p>
+    <button class="button primary" type="submit">登录</button>
+  </form>
 </main>
+
+<div id="appShell" class="shell" hidden>
+  <aside class="sidebar">
+    <a class="brand" href="#dashboard"><img src="/assets/icons/auto.svg" alt="">ProxySub</a>
+    <nav class="navigation" aria-label="管理面板">
+      <a href="#dashboard" aria-current="page">工作台</a>
+      <a href="#subscriptions">链接管理</a>
+      <a href="#nodes">节点预览</a>
+      <a href="#settings">设置与诊断</a>
+    </nav>
+    <div class="sidebar-footer">
+      <button id="logoutButton" class="button quiet" type="button">退出登录</button>
+      <span id="versionText" class="muted"></span>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="page-header">
+      <h1 id="pageTitle">工作台</h1>
+      <span id="domainBadge" class="badge"></span>
+    </header>
+
+    <section id="dashboard" data-page aria-labelledby="pageTitle">
+      <div class="dashboard-grid">
+        <section class="card">
+          <div class="section-title">
+            <h2>优选入口</h2>
+            <span id="editStatus" class="badge" role="status">已保存</span>
+          </div>
+          <form id="preferredForm">
+            <label class="visually-hidden" for="preferredIps">优选 IP 或域名列表</label>
+            <textarea id="preferredIps" rows="8" spellcheck="false" required placeholder="104.16.1.2#备注&#10;example.com:443#域名备注"></textarea>
+            <div class="editor-hint hint"><span id="lineCount"></span><span>每行一个地址，# 后可写备注</span></div>
+            <div class="editor-actions">
+              <div class="node-limit">
+                <label for="nodeLimit">优选数量</label>
+                <input id="nodeLimit" type="number" min="0" max="1000" step="1" value="0" required inputmode="numeric" aria-describedby="limitHint">
+                <span id="limitHint" class="hint">0 = 全部</span>
+              </div>
+              <div class="form-actions">
+                <button id="restoreButton" class="button secondary" type="button">填入预置</button>
+                <button id="saveButton" class="button primary" type="submit">保存优选入口</button>
+              </div>
+            </div>
+            <p id="saveError" class="message error" role="alert" hidden></p>
+            <p id="saveStatus" class="hint" role="status"></p>
+          </form>
+        </section>
+
+        <section class="card subscription">
+          <div class="section-title"><h2>订阅</h2><a href="#subscriptions">管理链接</a></div>
+          <div class="subscription-selectors">
+            <label for="subscriptionSelect">链接<select id="subscriptionSelect"></select></label>
+            <label for="formatSelect">格式<select id="formatSelect">
+              <option value="auto">通用（自动识别）</option>
+              <option value="raw">v2rayN / Shadowrocket</option>
+              <option value="cdn">v2rayN / Shadowrocket（仅 CDN）</option>
+              <option value="clash">Clash / Mihomo</option>
+              <option value="surge">Surge</option>
+            </select></label>
+          </div>
+          <div class="subscription-output">
+            <img id="mainQr" alt="当前订阅二维码" width="136" height="136" hidden>
+            <div class="subscription-link">
+              <label for="mainUrl">订阅地址</label>
+              <input id="mainUrl" readonly>
+              <button id="copyMain" class="button primary" type="button">复制链接</button>
+            </div>
+          </div>
+          <p id="formatWarning" class="message warning" hidden></p>
+        </section>
+      </div>
+
+      <section id="regionalCatalog" class="card regional-catalog" aria-labelledby="catalogTitle" hidden>
+        <div class="section-title"><h2 id="catalogTitle">地区候选</h2><span class="hint">添加后保存优选入口</span></div>
+        <div id="catalogRegions" class="catalog-regions"></div>
+        <p id="catalogStatus" class="hint" role="status" hidden></p>
+      </section>
+    </section>
+
+    <section id="subscriptions" class="card" data-page aria-labelledby="pageTitle" hidden>
+      <div class="section-title">
+        <span id="linkCount" class="badge"></span>
+        <div class="form-actions">
+          <button id="createCustom" class="button secondary" type="button">自定义路径</button>
+          <button id="createRandom" class="button primary" type="button">生成随机链接</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">名称 / 路径</th><th scope="col">最近更新</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody id="linkRows"></tbody>
+      </table></div>
+      <p class="hint">停用或删除链接会阻止订阅更新。已导入的节点仍可使用。</p>
+    </section>
+
+    <section id="nodes" class="card" data-page aria-labelledby="pageTitle" hidden>
+      <div class="section-title">
+        <span id="previewCount" class="badge"></span>
+        <a href="https://github.com/XIU2/CloudflareSpeedTest" target="_blank" rel="noopener noreferrer">CloudflareSpeedTest ↗</a>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">节点名称</th><th scope="col">连接入口</th><th scope="col">端口</th><th scope="col">传输</th></tr></thead>
+        <tbody id="previewRows"></tbody>
+      </table></div>
+    </section>
+
+    <section id="settings" class="settings-grid" data-page aria-labelledby="pageTitle" hidden>
+      <section class="card">
+        <h2>更换域名</h2>
+        <p class="hint">先将新域名的 A 记录指向此服务器并开放 HTTP 80，签发证书时可暂用灰云。</p>
+        <form id="domainForm">
+          <label for="newDomain">新域名</label>
+          <div class="domain-row">
+            <input id="newDomain" type="text" placeholder="proxy.example.com" maxlength="253" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+            <button id="domainButton" class="button secondary" type="submit">更换域名</button>
+          </div>
+        </form>
+        <p id="domainStatus" class="hint" role="status"></p>
+        <p id="domainError" class="message error" role="alert" hidden></p>
+        <a id="newDomainLink" class="button secondary" hidden>打开新域名 ↗</a>
+      </section>
+      <section class="card">
+        <h2>访问诊断</h2>
+        <p class="hint">检测当前域名是否经 Cloudflare 代理。橙云的 SSL/TLS 模式使用「完全（严格）」。</p>
+        <button id="checkConnection" class="button secondary" type="button">检测访问方式</button>
+        <p id="connectionStatus" class="hint" role="status"></p>
+      </section>
+      <section class="card">
+        <h2>管理密码</h2>
+        <button id="securityButton" class="button secondary" type="button">修改密码</button>
+      </section>
+    </section>
+  </main>
+</div>
 <dialog id="linkDialog"><form id="linkForm"><div class="dialog-head"><h2 id="linkTitle">创建订阅链接</h2><button class="close-dialog" type="button" aria-label="关闭">×</button></div><label for="linkName">链接名称</label><input id="linkName" maxlength="60" required placeholder="例如：我的 iPhone"><label for="linkSlug">易记路径（可选）</label><div class="prefix-input"><span>/subscribe/</span><input id="linkSlug" pattern="[a-z0-9][a-z0-9_-]{2,47}" maxlength="48" placeholder="my-devices"></div><p class="hint">使用小写字母、数字和短横线；留空自动生成随机路径。修改路径后旧地址会失效。</p><p id="linkError" class="message error" hidden></p><button class="button primary wide" type="submit">保存链接</button></form></dialog>
 <dialog id="passwordDialog"><form id="passwordForm"><div class="dialog-head"><h2>修改管理密码</h2><button class="close-dialog" type="button" aria-label="关闭">×</button></div><label for="currentPassword">当前密码</label><input id="currentPassword" type="password" autocomplete="current-password" required><label for="newPassword">新密码</label><input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><p class="hint">至少 8 个字符。修改后所有设备需要重新登录。</p><p id="passwordError" class="message error" hidden></p><button class="button primary wide" type="submit">更新密码</button></form></dialog>
 <dialog id="deleteDialog"><div class="dialog-head"><h2>删除订阅链接？</h2><button class="close-dialog" type="button" aria-label="关闭">×</button></div><p id="deleteMessage" class="muted"></p><div class="form-actions"><button id="cancelDelete" class="button secondary" type="button">取消</button><button id="confirmDelete" class="button danger" type="button">删除链接</button></div></dialog>

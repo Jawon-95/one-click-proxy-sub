@@ -1,15 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const PLATFORMS=[
-  {key:'auto',name:'通用订阅',description:'按客户端自动识别',icon:'auto'},
-  {key:'raw',name:'V2rayN / v2rayNG',description:'Windows · Android',icon:'v2rayn'},
-  {key:'shadowrocket',name:'Shadowrocket',description:'iPhone · iPad',icon:'shadowrocket',target:'raw'},
-  {key:'clash',name:'Clash / Mihomo',description:'Clash Verge 等客户端',icon:'clash'},
-  {key:'surge',name:'Surge',description:'macOS · iOS',icon:'surge'},
-];
 let state,csrf='',selectedId,editing,dirty=false,toastTimer,domainJob,domainTimer,pendingDomain='';
-let catalogRegion='sg';
-const catalogSelected=new Set();
 const text=(tag,cls,value)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined)el.textContent=value;return el;};
 function notice(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 function errorAt(id,error){$(id).textContent=error?.message||'';$(id).hidden=!error;}
@@ -23,35 +14,28 @@ async function api(path,method='GET',body){
 async function busy(button,fn){button.disabled=true;try{await fn();}catch(error){notice(error.message);}finally{button.disabled=false;}}
 async function copy(value){if(!value)return;await navigator.clipboard.writeText(value);notice('订阅链接已复制');}
 function selected(){return state?.subscriptions.find(r=>String(r.id)===String(selectedId)&&r.enabled);}
-function urlFor(row,target='auto'){return row.url+(target!=='auto'?'?target='+target:'');}
-function qrFor(row,target='auto'){return '/api/subscriptions/'+row.id+'/qr?target='+target;}
 function date(value){return value?new Date(value*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未更新';}
 function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';renderCatalog();}
 function renderOutput(){
-  const row=selected();
-  if(row){$('mainQr').src=qrFor(row);$('mainQr').hidden=false;$('mainUrl').value=row.url;}
-  else{$('mainQr').removeAttribute('src');$('mainQr').hidden=true;$('mainUrl').value='请先创建或启用一个订阅链接';}
-  $('copyMain').disabled=!row;
-  const fragment=document.createDocumentFragment();
-  for(const platform of PLATFORMS){
-    const target=platform.target||platform.key;
-    const available=!!row&&(target==='auto'||state.generator.availableFormats.includes(target));
-    const card=text('article','platform-card');
-    const head=text('div','client-head');const icon=text('img');icon.src='/assets/icons/'+platform.icon+'.svg';icon.alt='';const labels=text('div');labels.append(text('h3','',platform.name),text('p','',platform.description));head.append(icon,labels);
-    const qr=text('img','card-qr');qr.alt=platform.name+' 订阅二维码';qr.width=132;qr.height=132;
-    const input=text('input');input.readOnly=true;input.setAttribute('aria-label',platform.name+' 订阅链接');
-    const button=text('button','button secondary','复制订阅链接');button.type='button';button.disabled=!available;
-    if(available){input.value=urlFor(row,target);qr.src=qrFor(row,target);button.addEventListener('click',()=>busy(button,()=>copy(input.value)));}
-    else{input.value='此格式暂不可用';qr.hidden=true;}
-    card.append(head,qr,input,button);fragment.append(card);
+  const row=selected(),format=$('formatSelect').value;
+  const target=format==='cdn'?'raw':format;
+  const query=new URLSearchParams();
+  if(target!=='auto')query.set('target',target);
+  if(format==='cdn')query.set('cdn','1');
+  const available=!!row&&(target==='auto'||state.generator.availableFormats.includes(target));
+  if(available){
+    const suffix=query.size?'?'+query:'';
+    $('mainQr').src='/api/subscriptions/'+row.id+'/qr'+suffix;
+    $('mainUrl').value=row.url+suffix;
+  }else{
+    $('mainQr').removeAttribute('src');
+    $('mainUrl').value=row?'此格式暂不可用':'请先创建或启用订阅链接';
   }
-  $('platformCards').replaceChildren(fragment);
+  $('mainQr').hidden=!available;
+  $('copyMain').disabled=!available;
 }
 function renderPreview(){
   const generator=state.generator;
-  $('nodeCount').textContent=generator.counts.outputNodes;
-  $('endpointCount').textContent=generator.counts.preferredEndpoints;
-  $('resultCount').textContent=generator.counts.outputNodes+' 个节点';
   $('previewCount').textContent='预览前 '+Math.min(generator.preview.length,generator.counts.outputNodes)+' / '+generator.counts.outputNodes+' 个';
   const fragment=document.createDocumentFragment();
   for(const node of generator.preview){const tr=text('tr');const name=text('td','node-name',node.name);const host=text('td');host.append(text('code','',node.server));tr.append(name,host,text('td','',node.port),text('td','',node.type.toUpperCase()+' · '+node.network.toUpperCase()));fragment.append(tr);}
@@ -59,48 +43,57 @@ function renderPreview(){
   $('formatWarning').hidden=!generator.warnings.length;$('formatWarning').textContent=generator.warnings.join('\n');
 }
 function action(label,fn,cls=''){const button=text('button',cls,label);button.type='button';button.addEventListener('click',()=>busy(button,fn));return button;}
-function currentCatalogRegion(){return state?.endpointCatalog?.regions.find(region=>region.id===catalogRegion);}
-function availableCatalogEntries(){
-  const existing=RegionalEndpoints.keys($('preferredIps').value);
-  return (currentCatalogRegion()?.entries||[]).filter(entry=>!existing.has(RegionalEndpoints.key(entry.address)));
-}
-function updateCatalogSelection(){
-  const available=availableCatalogEntries();
-  const count=available.filter(entry=>catalogSelected.has(RegionalEndpoints.key(entry.address))).length;
-  $('catalogAdd').disabled=!count;
-  $('catalogAdd').textContent='添加所选到编辑列表'+(count?'（'+count+'）':'');
-  $('catalogSelectAll').disabled=!available.length;
-  $('catalogSelectAll').checked=!!available.length&&count===available.length;
-  $('catalogSelectAll').indeterminate=count>0&&count<available.length;
-}
 function renderCatalog(){
-  const catalog=state?.endpointCatalog,region=currentCatalogRegion();
-  $('regionalCatalog').hidden=!region;
-  if(!region)return;
-  $('catalogNotice').textContent=catalog.notice;
-  $('catalogDescription').textContent=region.description;
-  $('catalogMeta').textContent=region.verification+' · 更新于 '+catalog.updatedAt;
-  const tabs=document.createDocumentFragment();
-  for(const item of catalog.regions){
-    const button=action(item.name+' · '+item.entries.length,()=>{catalogRegion=item.id;catalogSelected.clear();renderCatalog();},'button '+(item.id===region.id?'secondary':'quiet'));
-    button.setAttribute('aria-pressed',String(item.id===region.id));tabs.append(button);
+  const regions=state?.endpointCatalog?.regions||[];
+  $('regionalCatalog').hidden=!regions.length;
+  const existing=RegionalEndpoints.keys($('preferredIps').value);
+  const selectedKeys=new Set([...$('catalogRegions').querySelectorAll('input[data-entry]:checked')].map(input=>input.dataset.entry));
+  const cards=document.createDocumentFragment();
+  for(const region of regions){
+    const panel=text('section','region');
+    const header=text('div','section-title');
+    const title=text('h3','',region.name+' · '+region.entries.length);
+    const selectable=[];
+    const add=action('添加所选',()=>{
+      const entries=selectable.filter(({input})=>input.checked).map(({entry})=>entry);
+      const result=RegionalEndpoints.merge($('preferredIps').value,entries);
+      $('preferredIps').value=result.value;
+      markDirty();
+      const limit=$('nodeLimit').valueAsNumber;
+      $('catalogStatus').textContent='已添加 '+result.added+' 个地址。'+(limit>0?' 新地址位于列表末尾，请检查数量上限。':'');
+      $('catalogStatus').hidden=false;
+    },'button secondary small');
+    const copyList=action('复制',async()=>{
+      await navigator.clipboard.writeText(region.entries.map(entry=>entry.address+'#'+entry.label).join('\n'));
+      notice('已复制'+region.name+'候选列表');
+    },'button quiet small');
+    const actions=text('div','form-actions');
+    actions.append(copyList,add);
+    header.append(title,actions);
+    const list=text('ul','region-list');
+    list.setAttribute('aria-label',region.name+'候选入口');
+    list.tabIndex=0;
+    for(const entry of region.entries){
+      const key=RegionalEndpoints.key(entry.address),included=existing.has(key);
+      const item=text('li'),label=text('label','region-entry'),input=text('input');
+      input.type='checkbox';
+      input.dataset.entry=key;
+      input.disabled=included;
+      input.checked=!included&&selectedKeys.has(key);
+      if(!included)selectable.push({entry,input});
+      const address=text('code','',entry.address),remark=text('span','muted',entry.label);
+      label.append(input,address,remark);
+      if(included)label.append(text('span','included','已加入'));
+      item.append(label);
+      list.append(item);
+    }
+    const update=()=>{add.disabled=!selectable.some(({input})=>input.checked);};
+    list.addEventListener('change',update);
+    update();
+    panel.append(header,text('p','hint region-note',region.verification),list);
+    cards.append(panel);
   }
-  $('catalogRegions').replaceChildren(tabs);
-  const existing=RegionalEndpoints.keys($('preferredIps').value),rows=document.createDocumentFragment();
-  for(const entry of region.entries){
-    const key=RegionalEndpoints.key(entry.address),included=existing.has(key),tr=text('tr');
-    const choice=text('td'),checkbox=text('input');checkbox.type='checkbox';checkbox.disabled=included;checkbox.checked=!included&&catalogSelected.has(key);
-    checkbox.setAttribute('aria-label',entry.label+' '+entry.address);
-    checkbox.addEventListener('change',()=>{if(checkbox.checked)catalogSelected.add(key);else catalogSelected.delete(key);updateCatalogSelection();});choice.append(checkbox);
-    const endpoint=text('td');endpoint.append(text('code','',entry.address),text('div','catalog-remark',entry.label));
-    const status=text('td');status.append(text('span',included?'enabled':'catalog-verification',included?'已在编辑列表':entry.observedColo?'MNL 采样 · 代理验证通过':'用户提供 · 待自测'));
-    if(entry.source){const link=text('a','catalog-source','来源 ↗');link.href=entry.source;link.target='_blank';link.rel='noopener noreferrer';status.append(link);}
-    tr.append(choice,endpoint,status);rows.append(tr);
-  }
-  $('catalogRows').replaceChildren(rows);
-  const sources=document.createDocumentFragment();
-  for(const source of catalog.sources){const link=text('a','',source.label+' ↗');link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';sources.append(link);}
-  $('catalogSources').replaceChildren(sources);updateCatalogSelection();
+  $('catalogRegions').replaceChildren(cards);
 }
 function renderLinks(){
   const enabled=state.subscriptions.filter(r=>r.enabled);
@@ -113,41 +106,57 @@ function renderLinks(){
   for(const row of state.subscriptions){
     const tr=text('tr');const name=text('td');name.append(text('div','link-name',row.name),text('div','link-path',row.path));
     const operations=text('td');const buttons=text('div','row-actions');
-    buttons.append(action('复制',()=>copy(row.url)),action('编辑',()=>openLink(row)),action(row.enabled?'停用':'启用',async()=>{await api('/api/subscriptions/'+row.id,'PATCH',{enabled:!row.enabled});await reload();notice(row.enabled?'链接已停用':'链接已启用');}),action('删除',()=>openDelete(row),'delete'));
+    buttons.append(action('复制',()=>copy(row.url)),action('编辑',()=>openLink(row)),action(row.enabled?'停用':'启用',async()=>{await api('/api/subscriptions/'+row.id,'PATCH',{enabled:!row.enabled});await reload({preserveDraft:true});notice(row.enabled?'链接已停用':'链接已启用');}),action('删除',()=>openDelete(row),'delete'));
     operations.append(buttons);tr.append(name,text('td','',date(row.last_access)),text('td',row.enabled?'enabled':'disabled',row.enabled?'使用中':'已停用'),operations);fragment.append(tr);
   }
   $('linkRows').replaceChildren(fragment);$('linkCount').textContent=state.subscriptions.length+' 个链接';renderOutput();
 }
-async function reload(){state=await api('/api/state');csrf=state.csrf;$('loginScreen').hidden=true;$('appShell').hidden=false;$('domainBadge').textContent=state.domain;$('versionText').textContent='v'+state.version;$('preferredIps').value=state.generator.preferredIps;$('nodeLimit').value=state.generator.nodeLimit||0;markDirty();renderDomain(state.domainChange);renderPreview();renderLinks();$('saveStatus').textContent='上次保存：'+date(state.generator.updatedAt)+'。在客户端更新订阅，即可获取最新节点。';}
+const pageLinks=[...document.querySelectorAll('.navigation a')];
+const pages=[...document.querySelectorAll('[data-page]')];
+function showPage(){
+  const active=pageLinks.find(link=>link.hash===location.hash)||pageLinks[0];
+  for(const link of pageLinks){
+    if(link===active)link.setAttribute('aria-current','page');
+    else link.removeAttribute('aria-current');
+  }
+  for(const page of pages)page.hidden='#'+page.id!==active.hash;
+  $('pageTitle').textContent=active.textContent;
+}
+window.addEventListener('hashchange',showPage);
+showPage();
+
+async function reload({preserveDraft=false}={}){
+  const keepDraft=preserveDraft&&dirty;
+  state=await api('/api/state');
+  csrf=state.csrf;
+  $('loginScreen').hidden=true;
+  $('appShell').hidden=false;
+  $('domainBadge').textContent=state.domain;
+  $('versionText').textContent='v'+state.version;
+  if(!keepDraft){
+    $('preferredIps').value=state.generator.preferredIps;
+    $('nodeLimit').value=state.generator.nodeLimit||0;
+    $('catalogStatus').hidden=true;
+  }
+  markDirty();
+  renderDomain(state.domainChange);
+  renderPreview();
+  renderLinks();
+  $('saveStatus').textContent='上次保存 '+date(state.generator.updatedAt)+' · '+state.generator.counts.outputNodes+' 个 Trojan 节点';
+}
 function openLink(row){editing=row||null;$('linkTitle').textContent=row?'编辑订阅链接':'自定义订阅链接';$('linkName').value=row?.name||'';$('linkSlug').value=row?.path.startsWith('/subscribe/')?row.path.slice(11):'';errorAt('linkError',null);$('linkDialog').showModal();}
-function openDelete(row){$('deleteMessage').textContent='删除「'+row.name+'」后，这个地址将无法再更新订阅。此操作无法恢复。';$('deleteDialog').showModal();$('confirmDelete').onclick=()=>busy($('confirmDelete'),async()=>{await api('/api/subscriptions/'+row.id,'DELETE',{});$('deleteDialog').close();await reload();notice('链接已删除');});}
+function openDelete(row){$('deleteMessage').textContent='删除「'+row.name+'」后，这个地址将无法再更新订阅。此操作无法恢复。';$('deleteDialog').showModal();$('confirmDelete').onclick=()=>busy($('confirmDelete'),async()=>{await api('/api/subscriptions/'+row.id,'DELETE',{});$('deleteDialog').close();await reload({preserveDraft:true});notice('链接已删除');});}
 $('loginForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{errorAt('loginError',null);try{const value=await api('/api/login','POST',{password:$('loginPassword').value});csrf=value.csrf;$('loginPassword').value='';await reload();}catch(error){errorAt('loginError',error);}});});
 $('preferredIps').addEventListener('input',markDirty);
-$('catalogSelectAll').addEventListener('change',()=>{
-  const checked=$('catalogSelectAll').checked;
-  for(const entry of availableCatalogEntries()){const key=RegionalEndpoints.key(entry.address);if(checked)catalogSelected.add(key);else catalogSelected.delete(key);}
-  renderCatalog();
-});
-$('catalogAdd').addEventListener('click',()=>{
-  const selected=availableCatalogEntries().filter(entry=>catalogSelected.has(RegionalEndpoints.key(entry.address)));
-  const result=RegionalEndpoints.merge($('preferredIps').value,selected);
-  $('preferredIps').value=result.value;catalogSelected.clear();markDirty();
-  const limit=$('nodeLimit').valueAsNumber;
-  const message='已添加 '+result.added+' 个地址到编辑列表，点击「保存并更新订阅」后生效。'+(limit>0?'当前只输出前 '+limit+' 个优选地址；新地址在末尾，请按需调整顺序或数量上限。':'');
-  $('catalogStatus').textContent=message;notice(message);
-});
-$('catalogCopy').addEventListener('click',()=>busy($('catalogCopy'),async()=>{
-  await navigator.clipboard.writeText(currentCatalogRegion().entries.map(entry=>entry.address+'#'+entry.label).join('\n'));
-  notice('已复制'+currentCatalogRegion().name+'候选列表');
-}));
 $('nodeLimit').addEventListener('input',markDirty);
 $('preferredForm').addEventListener('submit',event=>{event.preventDefault();busy($('saveButton'),async()=>{errorAt('saveError',null);try{await api('/api/generate','POST',{preferredIps:$('preferredIps').value,nodeLimit:$('nodeLimit').valueAsNumber});await reload();notice('已保存，所有订阅链接立即更新');}catch(error){errorAt('saveError',error);}});});
 $('restoreButton').addEventListener('click',()=>{$('preferredIps').value=state.generator.defaultPreferredIps;markDirty();notice('已填入预置地址，点击保存后生效');});
 $('subscriptionSelect').addEventListener('change',()=>{selectedId=$('subscriptionSelect').value;renderOutput();});
-$('copyMain').addEventListener('click',()=>busy($('copyMain'),()=>copy(selected()?.url)));
-$('createRandom').addEventListener('click',()=>busy($('createRandom'),async()=>{const row=await api('/api/subscriptions','POST',{name:'新订阅 '+new Date().toLocaleDateString('zh-CN')});selectedId=row.id;await reload();notice('已生成新的订阅链接和二维码');}));
+$('formatSelect').addEventListener('change',renderOutput);
+$('copyMain').addEventListener('click',()=>busy($('copyMain'),()=>copy($('mainUrl').value)));
+$('createRandom').addEventListener('click',()=>busy($('createRandom'),async()=>{const row=await api('/api/subscriptions','POST',{name:'新订阅 '+new Date().toLocaleDateString('zh-CN')});selectedId=row.id;await reload({preserveDraft:true});notice('已生成新的订阅链接和二维码');}));
 $('createCustom').addEventListener('click',()=>openLink());
-$('linkForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{errorAt('linkError',null);const value={name:$('linkName').value.trim()};const slug=$('linkSlug').value.trim();if(slug||!editing)value.slug=slug;try{const row=await api(editing?'/api/subscriptions/'+editing.id:'/api/subscriptions',editing?'PATCH':'POST',value);selectedId=row.id;$('linkDialog').close();await reload();notice('链接已保存');}catch(error){errorAt('linkError',error);}});});
+$('linkForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{errorAt('linkError',null);const value={name:$('linkName').value.trim()};const slug=$('linkSlug').value.trim();if(slug||!editing)value.slug=slug;try{const row=await api(editing?'/api/subscriptions/'+editing.id:'/api/subscriptions',editing?'PATCH':'POST',value);selectedId=row.id;$('linkDialog').close();await reload({preserveDraft:true});notice('链接已保存');}catch(error){errorAt('linkError',error);}});});
 $('securityButton').addEventListener('click',()=>{$('passwordForm').reset();errorAt('passwordError',null);$('passwordDialog').showModal();});
 $('passwordForm').addEventListener('submit',event=>{event.preventDefault();busy(event.submitter,async()=>{try{await api('/api/password','POST',{current:$('currentPassword').value,password:$('newPassword').value});$('passwordForm').reset();showLogin();notice('密码已修改，请重新登录');}catch(error){errorAt('passwordError',error);}});});
 $('logoutButton').addEventListener('click',()=>busy($('logoutButton'),async()=>{await api('/api/logout','POST',{});showLogin();}));
