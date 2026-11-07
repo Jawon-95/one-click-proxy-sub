@@ -77,6 +77,48 @@ def detect_ip():
     return prompt('服务器公网 IPv4：')
 
 
+def xray_dns_config():
+    nameservers = []
+    try:
+        lines = Path('/etc/resolv.conf').read_text().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 2 or fields[0] != 'nameserver':
+            continue
+        try:
+            nameservers.append(str(ipaddress.ip_address(fields[1])))
+        except ValueError:
+            continue
+
+    ipv4_only = False
+    if shutil.which('ip'):
+        try:
+            route = subprocess.run(['ip', '-6', 'route', 'show', 'default'],
+                                   capture_output=True, text=True, timeout=5)
+            ipv4_only = route.returncode == 0 and not route.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    servers = list(dict.fromkeys([*nameservers, '1.1.1.1', '8.8.8.8']))
+    strategy = 'UseIPv4' if ipv4_only else 'UseIP'
+    return {'servers': servers, 'queryStrategy': strategy, 'tag': 'system-dns'}, strategy
+
+
+def tune_tcp():
+    run('modprobe', 'tcp_bbr')
+    run('modprobe', 'sch_fq')
+    settings = {'net.core.default_qdisc': 'fq', 'net.ipv4.tcp_congestion_control': 'bbr'}
+    previous = {key: Path('/proc/sys', *key.split('.')).read_text().strip() for key in settings}
+    try:
+        run('sysctl', '-w', *(f'{key}={value}' for key, value in settings.items()))
+    except subprocess.CalledProcessError:
+        run('sysctl', '-w', *(f'{key}={value}' for key, value in previous.items()))
+        raise
+    write('/etc/modules-load.d/90-proxysub-bbr.conf', 'tcp_bbr\nsch_fq\n')
+    write('/etc/sysctl.d/90-proxysub-bbr.conf', ''.join(f'{key} = {value}\n' for key, value in settings.items()))
+
+
 def prepare(args):
     for user in ('xray', 'proxy-sub'):
         try:
@@ -229,7 +271,8 @@ def activate():
     if not config.get('retired_domains') and (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
         certificates.append({'certificateFile':str(CERTS/'fullchain.pem'),'keyFile':str(CERTS/'privkey.pem')})
     clients = [{'password':config['node_password'], 'email':'owner'}]
-    xray = {'log':{'loglevel':'warning','access':'none'}, 'inbounds':[
+    dns, strategy = xray_dns_config()
+    xray = {'log':{'loglevel':'warning','access':'none'}, 'dns': dns, 'inbounds':[
         {'tag':'trojan-tls','listen':'0.0.0.0','port':443,'protocol':'trojan',
          'settings':{'clients':clients,'fallbacks':[{'dest':'127.0.0.1:8080','xver':0},
              {'path':config['ws_path'],'dest':'127.0.0.1:10001','xver':0}]},
@@ -237,8 +280,11 @@ def activate():
              'rejectUnknownSni':bool(config.get('retired_domains')), 'certificates':certificates}}},
         {'tag':'trojan-ws','listen':'127.0.0.1','port':10001,'protocol':'trojan','settings':{'clients':clients},
          'streamSettings':{'network':'ws','security':'none','wsSettings':{'path':config['ws_path'],'heartbeatPeriod':30}}}],
-        'outbounds':[{'tag':'direct','protocol':'freedom'},{'tag':'block','protocol':'blackhole'}],
-        'routing':{'domainStrategy':'IPIfNonMatch','rules':[{'type':'field','ip':['geoip:private'],'outboundTag':'block'}]}}
+        'outbounds':[{'tag':'direct','protocol':'freedom','streamSettings':{'sockopt':{'domainStrategy':strategy}}},
+                     {'tag':'block','protocol':'blackhole'}],
+        'routing':{'domainStrategy':'IPIfNonMatch','rules':[
+            {'type':'field','inboundTag':['system-dns'],'ip':dns['servers'],'port':'53','outboundTag':'direct'},
+            {'type':'field','ip':['geoip:private'],'outboundTag':'block'}]}}
     candidate = ETC/'xray-candidate.json'
     write(candidate, xray, 0o640, 'xray')
     # The service user must be able to read the final location; validation here is root.
@@ -351,7 +397,7 @@ WantedBy=multi-user.target
 if __name__ == '__main__':
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['prepare','activate','domain'])
+    parser.add_argument('action', choices=['prepare','activate','domain','tune-tcp'])
     parser.add_argument('--domain')
     parser.add_argument('--origin-ip')
     parser.add_argument('--password-file')
@@ -360,5 +406,7 @@ if __name__ == '__main__':
         prepare(args)
     elif args.action == 'activate':
         activate()
+    elif args.action == 'tune-tcp':
+        tune_tcp()
     else:
         print(read(ETC/'config.json')['domain'])
