@@ -51,6 +51,7 @@ function renderCatalog(){
   const cards=document.createDocumentFragment();
   for(const region of regions){
     const panel=text('section','region');
+    panel.dataset.region=region.id;
     const header=text('div','section-title');
     const title=text('h3','',region.name+' · '+region.entries.length);
     const selectable=[];
