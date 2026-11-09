@@ -83,9 +83,10 @@ def prepare_ech(previous, public_name):
         if len(name) > 253 or not re.fullmatch(rf'{label}(?:\.{label})+', name):
             raise ValueError('ECH 公开域名必须是完整 DNS 域名。')
         key = ECH_DIR / f'{name}.pem'
+        ECH_DIR.mkdir(exist_ok=True, mode=0o750)
+        os.chown(ECH_DIR, 0, provision.grp.getgrnam('xray').gr_gid)
+        ECH_DIR.chmod(0o750)
         if not key.exists():
-            ECH_DIR.mkdir(exist_ok=True, mode=0o750)
-            os.chown(ECH_DIR, 0, provision.grp.getgrnam('xray').gr_gid)
             with tempfile.TemporaryDirectory(dir=ECH_DIR) as temporary:
                 candidate = Path(temporary) / 'ech.pem'
                 provision.run(str(BINARY), 'ech', '--public-name', name, '--output', str(candidate),
@@ -110,6 +111,7 @@ def enable(port, publish, public_name=None):
     password = previous.get('auth', {}).get('password') or secrets.token_urlsafe(32)
     current = server_config(port, password)
     key, ech = prepare_ech(previous, public_name)
+    provision.run('runuser', '-u', 'xray', '--', 'test', '-r', str(key))
     current['ech'] = {'keyPath': str(key)}
     provision.unit(SERVICE, f'''[Unit]
 Description=ProxySub Hysteria 2 direct listener
