@@ -47,14 +47,14 @@ curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/h
 
 ## 更新与状态
 
-重新执行同一个安装命令即可更新；也可以使用已安装的脚本：
+一键安装默认启用自动更新。服务器约每分钟检查 GitHub 的 `main`，有新提交时自动部署，并保留订阅链接和已保存的配置。部署时服务可能短暂重启。重新执行一键安装命令也可以立即更新。
 
 ```bash
 sudo bash /opt/proxy-manager/install.sh --upgrade
 sudo bash /opt/proxy-manager/install.sh --check
 ```
 
-前者从当前已安装源码重建运行配置；从 GitHub 获取最新程序版本时请使用上方 `curl` 命令。
+前者从当前已安装源码重建运行配置。[自动更新的查看、暂停和恢复](docs/DEPLOYMENT.md#自动更新)。
 
 [运维、备份及迁移](docs/OPERATIONS.md)
 

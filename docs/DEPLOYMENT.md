@@ -48,6 +48,20 @@ sudo bash install.sh --domain proxy.example.com --origin-ip YOUR_PUBLIC_IPV4 --p
 
 `PROXYSUB_REF` 可指定 GitHub 的提交 SHA 或标签，默认为 `main`。`PROXYSUB_REPO` 可指定自己的 fork，例如 `owner/repo`。固定源码版本不会改变安装器所固定的 Xray/Node.js 版本。
 
+## 自动更新
+
+一键安装默认启用 `proxy-auto-update.timer`。每台服务器约每分钟主动检查所配置的公开 GitHub 仓库的 `main`。发现新提交时按提交 SHA 下载源码，执行同一个升级脚本，保留域名、订阅链接和已有节点凭证。部署成功才记录该提交，失败会记入日志并在后续检查时重试。推送到被跟踪分支的代码会在服务器上以 root 执行。
+
+已部署的服务器重新执行一键安装命令一次即可接入。首次安装时如用 `PROXYSUB_REF` 固定到标签或提交，安装器不会启用自动更新。已接入自动更新的服务器如需固定版本，先暂停定时器。
+
+```bash
+systemctl list-timers proxy-auto-update.timer
+sudo journalctl -u proxy-auto-update.service -n 50
+sudo systemctl start proxy-auto-update.service           # 立即检查
+sudo systemctl disable --now proxy-auto-update.timer    # 暂停
+sudo systemctl enable --now proxy-auto-update.timer     # 恢复
+```
+
 ## 安装内容
 
 | 路径 | 内容 |
@@ -95,6 +109,14 @@ sudo systemctl status proxy-hysteria2
 刷新 v2rayN 的原订阅后，会出现 `000 | Hysteria 2 直连`。该节点也出现在纯文本订阅中。现有 `001 | 直连` 及优选列表继续使用 Trojan + WebSocket，普通 Cloudflare 橙云无法转发 Hysteria 2 UDP 会话。客户端连接源站 IP，并用管理域名验证证书。需要更换监听端口时，启用命令可加 `--port 8443`。
 
 可用 `enable --no-publish` 先启动测试入口，等客户端验证外网 UDP 可用后再运行 `enable` 将节点加入订阅。
+
+HY2 启用和升级时会配置 ECH。外层 SNI 默认显示为 `www.apple.com.cn`，内层继续用管理域名验证证书，目标 IP 仍是源站。要换成另一个公开域名，可运行以下命令，之后升级会沿用设置：
+
+```bash
+sudo /opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py refresh --ech-public-name public.example.net
+```
+
+普通 v2rayN 和纯文本订阅会携带 `ech` 参数。支持导入 HY2 ECH 的 v2rayN（例如 7.25.0 或 7.25.6）刷新原订阅即可自动填入 `EchConfigList`。忽略 ECH 的客户端仍能连接，但握手会显示管理域名。升级会保留启用状态、端口和是否发布到订阅的设置。
 
 如需撤回，执行以下命令。客户端刷新订阅后会移除 Hysteria 2 节点。
 

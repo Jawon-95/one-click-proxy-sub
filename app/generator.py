@@ -97,7 +97,10 @@ def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=
         except FileNotFoundError:
             return body, output['contentType']
         auth = quote(direct['password'], safe='')
-        query = urlencode({'sni': config['domain']})
+        params = {'sni': config['domain']}
+        if direct.get('ech'):
+            params['ech'] = direct['ech']
+        query = urlencode(params)
         name = quote('000 | Hysteria 2 直连', safe='')
         node = f'hysteria2://{auth}@{config["origin_ip"]}:{direct["port"]}/?{query}#{name}\n'.encode('utf-8')
         body = node + (base64.b64decode(body) if target == 'raw' else body)

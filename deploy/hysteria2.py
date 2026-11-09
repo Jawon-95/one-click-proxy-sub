@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import platform
+import re
 import secrets
 import socket
 import subprocess
@@ -21,6 +22,8 @@ ASSETS = {
 }
 BINARY = Path('/opt/proxy-hysteria/hysteria')
 SERVER = provision.XRAY_ETC / 'proxysub-hysteria2.json'
+ECH_DIR = provision.XRAY_ETC / 'hysteria2-ech'
+DEFAULT_ECH_NAME = 'www.apple.com.cn'
 PUBLISHED = provision.ETC / 'hysteria2.json'
 SERVICE = 'proxy-hysteria2.service'
 PRIVATE_NETWORKS = ('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8',
@@ -71,7 +74,33 @@ def bound(port):
         return False
 
 
-def enable(port, publish):
+def prepare_ech(previous, public_name):
+    if public_name is None and previous.get('ech', {}).get('keyPath'):
+        key = Path(previous['ech']['keyPath'])
+    else:
+        name = (public_name or DEFAULT_ECH_NAME).lower()
+        label = r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?'
+        if len(name) > 253 or not re.fullmatch(rf'{label}(?:\.{label})+', name):
+            raise ValueError('ECH 公开域名必须是完整 DNS 域名。')
+        key = ECH_DIR / f'{name}.pem'
+        if not key.exists():
+            ECH_DIR.mkdir(exist_ok=True, mode=0o750)
+            os.chown(ECH_DIR, 0, provision.grp.getgrnam('xray').gr_gid)
+            with tempfile.TemporaryDirectory(dir=ECH_DIR) as temporary:
+                candidate = Path(temporary) / 'ech.pem'
+                provision.run(str(BINARY), 'ech', '--public-name', name, '--output', str(candidate),
+                              stdout=subprocess.PIPE)
+                candidate.chmod(0o640)
+                os.chown(candidate, 0, provision.grp.getgrnam('xray').gr_gid)
+                candidate.replace(key)
+    match = re.search(r'-----BEGIN ECH CONFIGS-----\s+([A-Za-z0-9+/=\s]+)-----END ECH CONFIGS-----',
+                      key.read_text(encoding='ascii'))
+    if not match:
+        raise ValueError('ECH 密钥文件缺少公开配置。')
+    return key, ''.join(match[1].split())
+
+
+def enable(port, publish, public_name=None):
     if not all((provision.CERTS / 'domain' / name).is_file() for name in ('fullchain.pem', 'privkey.pem')):
         raise ValueError('请先完成 ProxySub 的域名证书安装。')
     previous = provision.read(SERVER, {})
@@ -80,6 +109,8 @@ def enable(port, publish):
     install_binary()
     password = previous.get('auth', {}).get('password') or secrets.token_urlsafe(32)
     current = server_config(port, password)
+    key, ech = prepare_ech(previous, public_name)
+    current['ech'] = {'keyPath': str(key)}
     provision.unit(SERVICE, f'''[Unit]
 Description=ProxySub Hysteria 2 direct listener
 After=network-online.target
@@ -114,7 +145,7 @@ WantedBy=multi-user.target
             raise RuntimeError(f'Hysteria 2 未能监听 UDP {port}，请检查服务日志。')
         provision.run('systemctl', 'enable', SERVICE)
         if publish:
-            provision.write(PUBLISHED, {'port': port, 'password': password}, 0o640, 'proxy-sub')
+            provision.write(PUBLISHED, {'port': port, 'password': password, 'ech': ech}, 0o640, 'proxy-sub')
         else:
             PUBLISHED.unlink(missing_ok=True)
     except Exception:
@@ -128,8 +159,9 @@ WantedBy=multi-user.target
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('enable', 'disable'))
+    parser.add_argument('action', choices=('enable', 'disable', 'refresh'))
     parser.add_argument('--port', type=int, default=443)
+    parser.add_argument('--ech-public-name', help=f'指定外层 SNI，默认使用现有设置或 {DEFAULT_ECH_NAME}。')
     parser.add_argument('--no-publish', action='store_true', help='启动测试入口，暂不加入订阅。')
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -140,7 +172,12 @@ def main():
     with (provision.ETC / 'hysteria2.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if args.action == 'enable':
-            enable(args.port, not args.no_publish)
+            enable(args.port, not args.no_publish, args.ech_public_name)
+        elif args.action == 'refresh':
+            if is_active() or subprocess.run(['systemctl', 'is-enabled', '--quiet', SERVICE]).returncode == 0:
+                previous = provision.read(SERVER)
+                port = int(previous['listen'].rsplit(':', 1)[1])
+                enable(port, PUBLISHED.exists(), args.ech_public_name)
         elif PUBLISHED.exists() or is_active():
             provision.run('systemctl', 'disable', '--now', SERVICE)
             PUBLISHED.unlink(missing_ok=True)

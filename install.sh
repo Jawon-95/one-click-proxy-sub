@@ -34,19 +34,22 @@ done
 if ((CHECK)); then
   systemctl --no-pager --full status xray proxy-subscription proxy-domain-change.path
   systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer proxy-domain-change.path proxy-domain-change.service
-  systemctl list-timers proxy-cert-renew.timer --no-pager
+  systemctl list-timers proxy-cert-renew.timer proxy-auto-update.timer --no-pager
   exit 0
 fi
 [[ -d /run/systemd/system ]] || { echo '本工具需要使用 systemd 的 Linux 服务器。' >&2; exit 1; }
+mkdir -p -m 0700 /var/lib/proxy-manager-admin
+exec 9>/var/lib/proxy-manager-admin/worker.lock
+flock -w 600 9
 . /etc/os-release
 case "$ID" in
   ubuntu|debian)
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip ca-certificates curl tar xz-utils unzip
+    apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip ca-certificates curl git tar xz-utils unzip
     PYTHON=python3 ;;
   alinux|opencloudos|rocky|almalinux|rhel|centos)
-    dnf install -y --setopt=install_weak_deps=False python3 python3-pip ca-certificates curl tar xz unzip
+    dnf install -y --setopt=install_weak_deps=False python3 python3-pip ca-certificates curl git tar xz unzip
     PYTHON=python3
     if ! python3 -c 'import sys; assert sys.version_info >= (3,10)' 2>/dev/null; then
       dnf install -y python3.11 python3.11-pip
@@ -62,12 +65,19 @@ trap cleanup EXIT
 trap 'echo "安装未完成，请修复上方错误后重新运行；不会清空现有配置。" >&2' ERR
 download() { curl -fLsS --retry 3 --connect-timeout 20 --max-time 300 "$1" -o "$2"; }
 SOURCE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-/dev/stdin}")" && pwd)
+REPO=${PROXYSUB_REPO:-}
+REF=${PROXYSUB_REF:-main}
+REVISION=${PROXYSUB_DEPLOY_REVISION:-}
 if [[ ! -f $SOURCE/app/server.py || ! -f $SOURCE/deploy/provision.py ]]; then
-  REPO=${PROXYSUB_REPO:-Jawon-95/one-click-proxy-sub}
-  REF=${PROXYSUB_REF:-main}
-  [[ $REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && $REF =~ ^[A-Za-z0-9_.-]+$ ]] || { echo '仓库或版本参数不正确。' >&2; exit 2; }
+  REPO=${REPO:-Jawon-95/one-click-proxy-sub}
+  [[ $REPO =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$ && $REF =~ ^[A-Za-z0-9_.-]+$ ]] || { echo '仓库或版本参数不正确。' >&2; exit 2; }
+  if [[ $REF == main ]]; then
+    REMOTE=$(GIT_TERMINAL_PROMPT=0 timeout 45 git ls-remote --exit-code "https://github.com/$REPO.git" refs/heads/main)
+    REVISION=${REMOTE%%$'\t'*}
+    [[ $REVISION =~ ^[0-9a-f]{40}$ ]] || { echo '无法解析 GitHub main 提交。' >&2; exit 1; }
+  fi
   echo '下载 ProxySub 源码…'
-  download "https://codeload.github.com/$REPO/tar.gz/$REF" "$WORK/source.tar.gz"
+  download "https://codeload.github.com/$REPO/tar.gz/${REVISION:-$REF}" "$WORK/source.tar.gz"
   mkdir "$WORK/source"
   tar -xzf "$WORK/source.tar.gz" -C "$WORK/source" --strip-components=1
   SOURCE=$WORK/source
@@ -149,6 +159,12 @@ echo '签发或检查域名 TLS 证书…'
 /opt/certbot/bin/certbot certonly --webroot -w /var/lib/proxy-acme -d "$DOMAIN" --cert-name "$DOMAIN" \
   --agree-tos --register-unsafely-without-email --non-interactive --keep-until-expiring
 /opt/proxy-web/bin/python /opt/proxy-manager/deploy/provision.py activate
+/opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py refresh
+systemctl is-active --quiet xray.service
+systemctl is-active --quiet proxy-subscription.service
+if [[ $REF == main ]]; then
+  /opt/proxy-web/bin/python /opt/proxy-manager/deploy/auto_update.py configure --repo "$REPO" --revision "$REVISION"
+fi
 echo "安装完成： https://$DOMAIN"
 echo '打开域名，输入管理密码即可查看预置入口、订阅链接和二维码。'
 echo 'Cloudflare DNS 橙云开启后可使用优选入口；SSL/TLS 请选择完全（严格）。'

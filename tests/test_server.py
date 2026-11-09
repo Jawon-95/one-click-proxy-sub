@@ -152,6 +152,13 @@ class ServerTests(unittest.TestCase):
             head, remaining = base64.b64decode(raw).split(b'\n', 1)
             self.assertTrue(head.startswith(b'hysteria2://fixture%2Bauth@203.0.113.10:8443/?sni=proxy.example.com#'))
             self.assertEqual(remaining.splitlines(), original.splitlines())
+            state.write_text(json.dumps({'port': 8443, 'password': 'fixture+auth', 'ech': 'a+/='}),
+                             encoding='utf-8')
+            _, raw = self.request(path+'?target=v2rayn')
+            head = base64.b64decode(raw).split(b'\n', 1)[0]
+            self.assertIn(b'?sni=proxy.example.com&ech=a%2B%2F%3D#', head)
+            _, plain = self.request(path+'?target=plain')
+            self.assertEqual(plain.splitlines()[0], head)
             _, filtered = self.request(path+'?target=v2rayn&cdn=1')
             self.assertEqual(base64.b64decode(filtered).splitlines(), cdn.splitlines())
         finally:
