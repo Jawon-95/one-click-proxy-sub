@@ -20,6 +20,7 @@ def defaults(config):
     node = f'trojan://{quote(config["node_password"], safe="")}@{domain}:443?{query}#My-Proxy'
     preset = (ROOT.parent / 'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
     return {'nodeLinks': node, 'preferredIps': preset, 'namePrefix': '', 'directIp': config.get('origin_ip', ''),
+            'country': config.get('country', ''),
             'keepOriginalHost': True, 'includeOriginal': True, 'nodeLimit': 0}
 
 
@@ -101,7 +102,8 @@ def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=
         if direct.get('ech'):
             params['ech'] = direct['ech']
         query = urlencode(params)
-        name = quote('000 | Hysteria 2 直连', safe='')
+        country = config.get('country', '')
+        name = quote(f'000 | {country} Hysteria 2 直连' if country else '000 | Hysteria 2 直连', safe='')
         node = f'hysteria2://{auth}@{config["origin_ip"]}:{direct["port"]}/?{query}#{name}\n'.encode('utf-8')
         body = node + (base64.b64decode(body) if target == 'raw' else body)
     return (base64.b64encode(body) if target == 'raw' else body), output['contentType']

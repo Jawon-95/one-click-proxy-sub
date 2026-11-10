@@ -58,9 +58,11 @@ class ProvisionTests(unittest.TestCase):
                 return original_write(path,*a,**kw)
             previous={key:sys.modules.pop(key,None) for key in ('server','generator')}
             try:
-                with patch.object(module,'run'),patch.object(module,'write',side_effect=isolated_write),patch.dict(os.environ,{},clear=False):
+                with patch.object(module,'run'),patch.object(module,'write',side_effect=isolated_write),patch.dict(os.environ,{},clear=False),\
+                     patch.object(module,'detect_country',return_value='SG') as detect:
                     module.prepare(args)
                     config=json.loads((root/'etc/config.json').read_text())
+                    self.assertEqual((config['country'],config['country_ip']),('SG','1.1.1.1'))
                     with sqlite3.connect(root/'data/panel.sqlite3') as conn:
                         original_hash=conn.execute("select value from metadata where key='admin_hash'").fetchone()[0]
                         self.assertEqual(conn.execute('select path from subscriptions').fetchone()[0],'/subscribe/main')
@@ -69,8 +71,11 @@ class ProvisionTests(unittest.TestCase):
                     generator.save({'preferredIps':'104.16.1.2#Saved','nodeLimit':1},config,server.db)
                     args.password_file=None
                     module.prepare(args)
+                    detect.assert_called_once_with('1.1.1.1')
                     with sqlite3.connect(root/'data/panel.sqlite3') as conn:
                         self.assertEqual(conn.execute("select value from metadata where key='admin_hash'").fetchone()[0],original_hash)
+                        names=[n['name'] for n in json.loads(json.loads(conn.execute('select result from generator_state').fetchone()[0])['formats']['json']['body'])]
+                        self.assertEqual(names,['001 | SG 直连','002 | SG Saved'])
                         self.assertEqual(conn.execute('select count(*) from sessions').fetchone()[0],1)
                         result=json.loads(conn.execute('select result from generator_state').fetchone()[0])
                         self.assertEqual(result['counts']['outputNodes'],2)

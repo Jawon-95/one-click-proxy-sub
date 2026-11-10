@@ -23,6 +23,18 @@ class ConversionTests(unittest.TestCase):
         limited=json.loads(self.convert(directIp='203.0.113.10',nodeLimit=1).stdout)
         self.assertEqual([n['name'] for n in json.loads(limited['formats']['json']['body'])],['001 | 直连','002 | Test'])
 
+    def test_country_code_follows_the_number(self):
+        result=self.convert(directIp='203.0.113.10',country='SG',preferredIps='104.16.1.2#Visa新加坡')
+        self.assertEqual(result.returncode,0,result.stderr)
+        data=json.loads(result.stdout)
+        expected=['001 | SG 直连','002 | SG 自动入口','003 | SG Visa新加坡']
+        self.assertEqual([n['name'] for n in json.loads(data['formats']['json']['body'])],expected)
+        links=base64.b64decode(data['formats']['raw']['body']).decode().splitlines()
+        self.assertEqual([unquote(urlsplit(link).fragment) for link in links],expected)
+        self.assertEqual(data['settings']['country'],'SG')
+        for invalid in ('sg','S','ABCD','S G'):
+            self.assertNotEqual(self.convert(country=invalid).returncode,0)
+
     def test_limit_selects_first_endpoints_without_truncating_saved_list(self):
         preset=(ROOT/'config/preferred-endpoints.txt').read_text(encoding='utf-8').strip()
         result=self.convert(preferredIps=preset,nodeLimit=100)

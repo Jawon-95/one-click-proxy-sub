@@ -31,6 +31,9 @@ export function convert(input) {
   }
   const prefix = String(input.namePrefix || '').trim();
   if (prefix.length > 40 || /[\r\n]/.test(prefix)) throw new Error('备注前缀需为 40 字以内的单行文本。');
+  // Country code of the server itself (detected at install time), shown after the number.
+  const country = String(input.country || '').trim();
+  if (country && !/^[A-Z]{2,3}$/.test(country)) throw new Error('国家缩写需为 2–3 个大写字母。');
   const options = {keepOriginalHost: input.keepOriginalHost !== false, namePrefix: prefix};
   const selectedEndpoints = nodeLimit ? endpoints.endpoints.slice(0, nodeLimit) : endpoints.endpoints;
   if (nodeLimit && !selectedEndpoints.length) throw new Error('限制数量时，请至少填写一个优选地址。');
@@ -50,7 +53,8 @@ export function convert(input) {
   nodes.forEach((node, index) => {
     const remark = node.endpointLabel || node.endpointSource || '自动入口';
     const extra = node.endpointSource && !direct.includes(node) ? prefix : '';
-    node.name = [String(index + 1).padStart(3, '0'), extra, remark].filter(Boolean).join(' | ');
+    const label = [extra, remark].filter(Boolean).join(' | ');
+    node.name = `${String(index + 1).padStart(3, '0')} | ${country ? country + ' ' : ''}${label}`;
   });
   const formats = {};
   const warnings = expanded.warnings;
@@ -62,7 +66,7 @@ export function convert(input) {
     }
   }
   formats.plain = {body:nodes.map(renderNodeUri).join('\n')+'\n',contentType:'text/plain; charset=utf-8'};
-  return {settings:{nodeLinks:source,preferredIps:preferred,namePrefix:prefix,directIp,
+  return {settings:{nodeLinks:source,preferredIps:preferred,namePrefix:prefix,directIp,country,
                    keepOriginalHost:options.keepOriginalHost,includeOriginal:input.includeOriginal!==false,nodeLimit},
     counts:{baseNodes:parsed.nodes.length,preferredEndpoints:endpoints.endpoints.length,selectedEndpoints:selectedEndpoints.length,directNodes:direct.length,outputNodes:nodes.length},
     preview:summarizeNodes(nodes,30), warnings,formats};

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ETC = Path('/etc/proxy-manager')
 DATA = Path('/var/lib/proxy-manager')
@@ -75,6 +75,27 @@ def detect_ip():
         except Exception:
             continue
     return prompt('服务器公网 IPv4：')
+
+
+def detect_country(ip):
+    """Return the ISO 3166-1 alpha-2 country of the server's public IPv4, or None."""
+    # The first two look up the recorded origin IP itself, so an IPv6 or tunnelled
+    # egress route cannot change the answer; Cloudflare's trace is the last resort.
+    sources = ((f'https://ipinfo.io/{ip}/country', r'\s*([A-Z]{2})\s*'),
+               (f'https://api.country.is/{ip}', r'.*"country"\s*:\s*"([A-Z]{2})".*'),
+               ('https://www.cloudflare.com/cdn-cgi/trace', r'.*^loc=([A-Z]{2})$.*'))
+    for _ in range(2):
+        for address, pattern in sources:
+            try:
+                request = Request(address, headers={'User-Agent': 'proxysub-installer', 'Accept': '*/*'})
+                with urlopen(request, timeout=10) as response:
+                    text = response.read(4096).decode('utf-8', 'replace')
+                match = re.fullmatch(pattern, text, re.S | re.M)
+                if match and match.group(1) != 'XX':
+                    return match.group(1)
+            except Exception:
+                continue
+    return None
 
 
 def xray_dns_config():
@@ -149,6 +170,18 @@ def prepare(args):
     config.update(domain=domain, origin_ip=origin, node_password=node_password,
                   ws_path=config.get('ws_path', '/connect'), data_dir=str(DATA),
                   acme_root='/var/lib/proxy-acme', node_binary='/opt/proxy-node/bin/node')
+    # Node names carry the server's country code. It is detected once per origin IP,
+    # so names stay stable across upgrades; editing "country" by hand overrides it.
+    country = str(config.get('country') or '').upper() if config.get('country_ip') == origin else ''
+    if not re.fullmatch(r'[A-Z]{2,3}', country):
+        country = detect_country(origin)
+    if country:
+        config.update(country=country, country_ip=origin)
+        print('服务器所在国家/地区：'+country)
+    else:
+        config.pop('country', None)
+        config.pop('country_ip', None)
+        print('未能识别服务器所在国家/地区，节点名称暂不带国家缩写，下次更新时会重试。')
     if not re.fullmatch(r'/[a-zA-Z0-9/_-]{1,60}', config['ws_path']):
         raise SystemExit('WebSocket 路径格式不正确。')
     ETC.mkdir(mode=0o750, parents=True, exist_ok=True)
