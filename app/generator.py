@@ -11,6 +11,12 @@ from urllib.parse import quote, urlencode, urlsplit
 
 LOCK = threading.Lock()
 ROOT = Path(__file__).resolve().parent
+# Client side of the XHTTP nodes: a small pool of long-lived HTTP/2 connections to the
+# Cloudflare entry. Opening a site reuses one of them instead of paying a TCP + TLS +
+# WebSocket handshake each time; several connections keep one lost packet from stalling
+# every stream. packet-up needs no Cloudflare setting, and its many small uploads are why
+# the per-connection request budget is raised.
+XHTTP_EXTRA = {'xmux': {'maxConnections': 8, 'hMaxRequestTimes': '4000-6000', 'hMaxReusableSecs': '1800-3000'}}
 
 
 def defaults(config):
@@ -79,7 +85,27 @@ def public_state(snapshot, config):
             'availableFormats': list(result['formats']), 'defaultPreferredIps': defaults(config)['preferredIps']}
 
 
-def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=False):
+def xhttp_nodes(nodes, config, config_path):
+    """Rewrite the Cloudflare entries as VLESS + XHTTP; other nodes keep their transport."""
+    try:
+        tunnel = json.loads(config_path.with_name('xhttp.json').read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return nodes  # The server has no XHTTP inbound; WebSocket remains valid.
+    domain = config['domain']
+    query = urlencode({'encryption': 'none', 'security': 'tls', 'sni': domain, 'alpn': 'h2', 'fp': 'chrome',
+                       'type': 'xhttp', 'host': domain, 'path': tunnel['path'], 'mode': 'packet-up',
+                       'extra': json.dumps(XHTTP_EXTRA, separators=(',', ':'))})
+    lines = []
+    for line in nodes.decode('utf-8').splitlines(keepends=True):
+        node = urlsplit(line.strip())
+        if node.scheme == 'trojan' and node.hostname != config['origin_ip']:
+            ending = line[len(line.rstrip()):]
+            line = f'vless://{tunnel["id"]}@{node.netloc.rpartition("@")[2]}?{query}#{node.fragment}{ending}'
+        lines.append(line)
+    return ''.join(lines).encode('utf-8')
+
+
+def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=False, xhttp=False):
     output = snapshot['result']['formats'].get(target)
     if not output:
         raise ValueError('该基础节点暂不支持此客户端格式。')
@@ -88,6 +114,9 @@ def render(snapshot, target, subscription_url, config, config_path, *, cdn_only=
         if cdn_only:
             raise ValueError('仅 CDN 订阅支持 v2rayN 和纯文本格式。')
         return body, output['contentType']
+    if xhttp:
+        nodes = xhttp_nodes(base64.b64decode(body) if target == 'raw' else body, config, config_path)
+        body = base64.b64encode(nodes) if target == 'raw' else nodes
     if cdn_only:
         nodes = base64.b64decode(body) if target == 'raw' else body
         body = b''.join(line for line in nodes.splitlines(keepends=True)

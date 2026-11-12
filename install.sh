@@ -2,7 +2,7 @@
 # ProxySub installer. Safe to run again; persistent configuration is retained.
 set -Eeuo pipefail
 umask 027
-VERSION=2.2.0
+VERSION=2.3.0
 XRAY_VERSION=26.3.27
 NODE_VERSION=22.23.4
 DOMAIN=
@@ -34,6 +34,7 @@ done
 if ((CHECK)); then
   systemctl --no-pager --full status xray proxy-subscription proxy-domain-change.path
   systemctl is-enabled xray proxy-subscription proxy-cert-renew.timer proxy-domain-change.path proxy-domain-change.service
+  systemctl is-active --quiet proxy-router.service && echo 'XHTTP 长连接入口：已启用' || echo 'XHTTP 长连接入口：未启用（节点使用 WebSocket）'
   systemctl list-timers proxy-cert-renew.timer proxy-auto-update.timer --no-pager
   exit 0
 fi

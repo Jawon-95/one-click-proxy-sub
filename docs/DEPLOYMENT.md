@@ -124,6 +124,15 @@ sudo /opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py refresh --
 sudo /opt/proxy-web/bin/python /opt/proxy-manager/deploy/hysteria2.py disable
 ```
 
+### CDN 节点的 XHTTP 长连接
+
+v2rayN / v2rayNG 更新订阅后，Cloudflare 优选节点会以 VLESS + XHTTP 下发：客户端与 Cloudflare 入口保持 8 条 HTTP/2 长连接并复用，打开新网页不再重新做 TCP、TLS 和 WebSocket 握手。在丢包或高延迟线路上，新网页的首字节时间可接近 Hysteria 2 直连。`001 | 直连`、Hysteria 2 以及 Clash、Surge、Shadowrocket 格式保持不变。
+
+- 服务器端新增本机路由 `proxy-router.service`（固定版本的 Caddy，仅监听 `127.0.0.1:10003`），按路径把请求分给 XHTTP 入站、WebSocket 入站和管理面板；不需要新开端口，也不需要修改 Cloudflare 设置。
+- 路由组件下载或自检失败时，安装器自动保持原有的 WebSocket 方式，订阅不会下发 XHTTP 节点。`sudo bash /opt/proxy-manager/install.sh --check` 会显示是否已启用。
+- 需要旧的 WebSocket 节点时，在面板选择「v2rayN（兼容模式 · WebSocket）」，或在订阅地址后加 `transport=ws`；其他基于 Xray 的客户端可加 `transport=xhttp` 主动获取 XHTTP 节点。
+- 连接空闲约 5 分钟后会关闭，之后第一次访问需要重新握手。吞吐仍受线路丢包和 Cloudflare 入口位置影响，建议选择延迟低的入口。
+
 ### 仅 CDN 订阅
 
 在面板「工作台 → 订阅」选择「v2rayN / Shadowrocket（仅 CDN）」获取二维码和链接。这个格式保留自动入口和自定义优选地址，并剔除使用源站 IP 的节点及 Hysteria 2 直连。手动拼接订阅地址时使用 `?target=raw&cdn=1`。

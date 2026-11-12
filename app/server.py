@@ -74,9 +74,18 @@ def public_subscription(row):
     return value
 
 
-def payload(row, fmt, *, cdn_only=False):
+def payload(row, fmt, *, cdn_only=False, xhttp=False):
     return generator.render(generator.get_snapshot(db), fmt, BASE + row['path'], CONFIG, CONFIG_PATH,
-                            cdn_only=cdn_only)
+                            cdn_only=cdn_only, xhttp=xhttp)
+
+
+def wants_xhttp(query, user_agent=''):
+    """XHTTP needs an Xray-based client: v2rayN and v2rayNG get it, others when they ask."""
+    choice = query.get('transport', [''])[0].lower()
+    if choice in ('ws', 'xhttp'):
+        return choice == 'xhttp'
+    target = (query.get('target', [''])[0] or query.get('format', [''])[0]).lower()
+    return target in ('v2rayn', 'v2rayng') or 'v2rayn' in user_agent.lower()
 
 
 def target_format(query, user_agent=''):
@@ -241,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.error(404, '订阅不存在或已停用')
                 if fmt in ('xray-mux', 'v2rayn-mux'):
                     return self.error(410, 'WebSocket 长连接订阅已停用，请在管理面板复制标准订阅。')
-                body, mime = payload(row, fmt, cdn_only=cdn_only)
+                body, mime = payload(row, fmt, cdn_only=cdn_only,
+                                     xhttp=wants_xhttp(query, self.headers.get('User-Agent', '')))
                 if self.command != 'HEAD':
                     conn.execute('UPDATE subscriptions SET hits=hits+1,last_access=? WHERE id=?', (int(time.time()), row['id']))
             title = 'ProxySub CDN' if cdn_only else 'ProxySub'
@@ -348,6 +358,8 @@ class Handler(BaseHTTPRequestHandler):
                         if fmt not in ('raw', 'base64'):
                             raise ValueError('仅 CDN 二维码支持通用节点链接格式')
                         options['cdn'] = '1'
+                    if query.get('transport') in (['ws'], ['xhttp']):
+                        options['transport'] = query['transport'][0]
                     link = BASE + row['path'] + ('?' + urllib.parse.urlencode(options) if options else '')
                     output = io.BytesIO()
                     qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage, border=4).save(output)

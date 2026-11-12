@@ -18,10 +18,11 @@ function date(value){return value?new Date(value*1000).toLocaleString('zh-CN',{m
 function markDirty(){dirty=$('preferredIps').value.trim()!==state?.generator.preferredIps.trim()||$('nodeLimit').valueAsNumber!==(state?.generator.nodeLimit||0);$('editStatus').textContent=dirty?'有未保存修改':'已保存';const list=$('preferredIps').value.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);$('lineCount').textContent=list.length+' 行地址';syncCatalog();}
 function renderOutput(){
   const row=selected(),format=$('formatSelect').value;
-  const target=format==='cdn'?'raw':format;
+  const target=format==='cdn'||format==='ws'?'raw':format;
   const query=new URLSearchParams();
   if(target!=='auto')query.set('target',target);
   if(format==='cdn')query.set('cdn','1');
+  if(format==='ws')query.set('transport','ws');
   const available=!!row&&(target==='auto'||state.generator.availableFormats.includes(target));
   if(available){
     const suffix=query.size?'?'+query:'';

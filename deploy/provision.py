@@ -7,14 +7,19 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import platform
 import pwd
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
+import uuid
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -29,6 +34,18 @@ ROOT = Path(__file__).resolve().parents[1]
 LEGACY_DATA = Path('/var/lib/proxy-sub')
 LEGACY_ADMIN = Path('/root/proxy-deployment')
 DOMAIN_ADMIN = Path('/var/lib/proxy-manager-admin')
+
+# XHTTP rides Cloudflare's HTTP/2 connections, so one TLS session carries many proxied
+# streams. HTTP/2 has no per-connection path to fall back on; a small local router sends
+# each request to the XHTTP inbound, the WebSocket inbound or the panel.
+ROUTER_VERSION = '2.11.9'
+ROUTER_ASSETS = {
+    'x86_64': ('amd64', '5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb'),
+    'aarch64': ('arm64', '5e377cff994fc9362a6fcf695c53f226cfca3a3ef85bd3a3687cf252d6310165'),
+}
+ROUTER_BINARY = Path('/opt/proxy-router/caddy')
+ROUTER_SERVICE = 'proxy-router.service'
+PANEL_PORT, WS_PORT, XHTTP_PORT, ROUTER_PORT = 8080, 10001, 10002, 10003
 
 
 def run(*args, **kwargs):
@@ -284,6 +301,182 @@ WantedBy=multi-user.target
     print('Management prepared for '+domain)
 
 
+def xhttp_identity(config):
+    """XHTTP path and VLESS id. Both follow the saved settings, so links survive upgrades."""
+    path = config.get('xhttp_path', '/link')
+    if not re.fullmatch(r'/[a-zA-Z0-9_-]{1,60}', path) or path == config.get('ws_path'):
+        raise ValueError('XHTTP 路径格式不正确。')
+    return {'path': path, 'id': str(uuid.uuid5(uuid.NAMESPACE_URL, 'proxysub-xhttp:'+config['node_password']))}
+
+
+def install_router():
+    asset = ROUTER_ASSETS.get(platform.machine())
+    if not asset:
+        raise ValueError('XHTTP 路由仅支持 Linux x86_64 和 ARM64。')
+    arch, digest = asset
+    marker = ROUTER_BINARY.with_name('archive.sha256')
+    if ROUTER_BINARY.is_file() and marker.is_file() and marker.read_text().strip() == digest:
+        return
+    ROUTER_BINARY.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    ROUTER_BINARY.parent.chmod(0o755)
+    with tempfile.TemporaryDirectory(dir=ROUTER_BINARY.parent) as temporary:
+        archive = Path(temporary)/'caddy.tar.gz'
+        run('curl', '-fLsS', '--retry', '2', '--connect-timeout', '15', '--max-time', '180',
+            f'https://github.com/caddyserver/caddy/releases/download/v{ROUTER_VERSION}/'
+            f'caddy_{ROUTER_VERSION}_linux_{arch}.tar.gz', '-o', str(archive))
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+            raise ValueError('XHTTP 路由组件 SHA256 验证失败。')
+        candidate = Path(temporary)/'caddy'
+        with tarfile.open(archive) as bundle, bundle.extractfile('caddy') as source:
+            candidate.write_bytes(source.read())
+        candidate.chmod(0o755)
+        candidate.replace(ROUTER_BINARY)
+    write(marker, digest+'\n')
+
+
+def router_config(config, tunnel):
+    return f"""{{
+	admin off
+	auto_https off
+	persist_config off
+	log {{
+		level WARN
+	}}
+	servers {{
+		protocols h1 h2c
+	}}
+}}
+http://:{ROUTER_PORT} {{
+	bind 127.0.0.1
+	@tunnel path {tunnel['path']} {tunnel['path']}/*
+	handle @tunnel {{
+		reverse_proxy h2c://127.0.0.1:{XHTTP_PORT} {{
+			flush_interval -1
+		}}
+	}}
+	@websocket path {config['ws_path']}
+	handle @websocket {{
+		reverse_proxy 127.0.0.1:{WS_PORT}
+	}}
+	handle {{
+		reverse_proxy 127.0.0.1:{PANEL_PORT}
+	}}
+}}
+"""
+
+
+def start_router(config):
+    """Install and start the request router; returns the XHTTP settings it serves."""
+    tunnel = xhttp_identity(config)
+    install_router()
+    path = XRAY_ETC/'proxysub-router.caddyfile'
+    write(path, router_config(config, tunnel), 0o640, 'xray')
+    with tempfile.TemporaryDirectory() as home:
+        run(str(ROUTER_BINARY), 'validate', '--config', str(path), '--adapter', 'caddyfile',
+            env=dict(os.environ, HOME=home, XDG_DATA_HOME=home, XDG_CONFIG_HOME=home),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    unit(ROUTER_SERVICE, f"""[Unit]
+Description=ProxySub HTTP/2 request router for XHTTP, WebSocket and the panel
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=xray
+Group=xray
+StateDirectory=proxy-router
+Environment=HOME=/var/lib/proxy-router XDG_DATA_HOME=/var/lib/proxy-router XDG_CONFIG_HOME=/var/lib/proxy-router
+ExecStart={ROUTER_BINARY} run --config {path} --adapter caddyfile
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+MemoryMax=384M
+TasksMax=256
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
+""")
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'enable', ROUTER_SERVICE)
+    run('systemctl', 'restart', ROUTER_SERVICE)
+    return tunnel
+
+
+def stop_router():
+    try:
+        run('systemctl', 'disable', '--now', ROUTER_SERVICE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        pass  # Never installed on this server.
+
+
+def router_status(path, method='GET', host='localhost'):
+    with socket.create_connection(('127.0.0.1', ROUTER_PORT), timeout=5) as conn:
+        conn.sendall(f'{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode())
+        head = conn.recv(64).split(b' ')
+    return int(head[1]) if len(head) > 1 and head[1].isdigit() else 0
+
+
+def router_healthy(config, tunnel):
+    """The panel and the XHTTP inbound both have to answer through the router."""
+    deadline = time.monotonic()+15
+    while True:
+        try:
+            # An idle XHTTP inbound rejects this bare request itself; 502-504 mean it is unreachable.
+            if (router_status('/', 'HEAD', config['domain']) == 200
+                    and router_status(tunnel['path']+'/health') not in (0, 502, 503, 504)):
+                return True
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(.5)
+
+
+def xray_config(config, certificates, tunnel):
+    clients = [{'password':config['node_password'], 'email':'owner'}]
+    dns, strategy = xray_dns_config()
+    # With the router every request is routed by its own path, so Cloudflare may reuse and
+    # multiplex origin connections. The WebSocket path keeps its direct route for upgrades.
+    front = ROUTER_PORT if tunnel else PANEL_PORT
+    inbounds = [
+        {'tag':'trojan-tls','listen':'0.0.0.0','port':443,'protocol':'trojan',
+         'settings':{'clients':clients,'fallbacks':[{'dest':f'127.0.0.1:{front}','xver':0},
+             {'path':config['ws_path'],'dest':f'127.0.0.1:{WS_PORT}','xver':0}]},
+         'streamSettings':{'network':'tcp','security':'tls','tlsSettings':{'minVersion':'1.2',
+             'alpn':['h2','http/1.1'] if tunnel else ['http/1.1'],
+             'rejectUnknownSni':bool(config.get('retired_domains')), 'certificates':certificates}}},
+        {'tag':'trojan-ws','listen':'127.0.0.1','port':WS_PORT,'protocol':'trojan','settings':{'clients':clients},
+         'streamSettings':{'network':'ws','security':'none','wsSettings':{'path':config['ws_path'],'heartbeatPeriod':30}}}]
+    if tunnel:
+        inbounds.append(
+            {'tag':'vless-xhttp','listen':'127.0.0.1','port':XHTTP_PORT,'protocol':'vless',
+             'settings':{'clients':[{'id':tunnel['id'],'email':'owner'}],'decryption':'none'},
+             'streamSettings':{'network':'xhttp','security':'none',
+                               'xhttpSettings':{'path':tunnel['path'],'mode':'auto'}}})
+    return {'log':{'loglevel':'warning','access':'none'}, 'dns': dns, 'inbounds':inbounds,
+        'outbounds':[{'tag':'direct','protocol':'freedom','streamSettings':{'sockopt':{'domainStrategy':strategy}}},
+                     {'tag':'block','protocol':'blackhole'}],
+        'routing':{'domainStrategy':'IPIfNonMatch','rules':[
+            {'type':'field','inboundTag':['system-dns'],'ip':dns['servers'],'port':'53','outboundTag':'direct'},
+            {'type':'field','ip':['geoip:private'],'outboundTag':'block'}]}}
+
+
+def install_xray_config(xray):
+    candidate = ETC/'xray-candidate.json'
+    write(candidate, xray, 0o640, 'xray')
+    # The service user must be able to read the final location; validation here is root.
+    run('/opt/xray/xray', 'run', '-test', '-config', str(candidate))
+    write(XRAY_ETC/'config.json', xray, 0o640, 'xray')
+    candidate.unlink()
+
+
 def activate():
     config = read(ETC/'config.json')
     domain = config['domain']
@@ -303,27 +496,14 @@ def activate():
     certificates = [{'certificateFile':str(domain_cert/'fullchain.pem'), 'keyFile':str(domain_cert/'privkey.pem')}]
     if not config.get('retired_domains') and (CERTS/'fullchain.pem').exists() and (CERTS/'privkey.pem').exists():
         certificates.append({'certificateFile':str(CERTS/'fullchain.pem'),'keyFile':str(CERTS/'privkey.pem')})
-    clients = [{'password':config['node_password'], 'email':'owner'}]
-    dns, strategy = xray_dns_config()
-    xray = {'log':{'loglevel':'warning','access':'none'}, 'dns': dns, 'inbounds':[
-        {'tag':'trojan-tls','listen':'0.0.0.0','port':443,'protocol':'trojan',
-         'settings':{'clients':clients,'fallbacks':[{'dest':'127.0.0.1:8080','xver':0},
-             {'path':config['ws_path'],'dest':'127.0.0.1:10001','xver':0}]},
-         'streamSettings':{'network':'tcp','security':'tls','tlsSettings':{'minVersion':'1.2','alpn':['http/1.1'],
-             'rejectUnknownSni':bool(config.get('retired_domains')), 'certificates':certificates}}},
-        {'tag':'trojan-ws','listen':'127.0.0.1','port':10001,'protocol':'trojan','settings':{'clients':clients},
-         'streamSettings':{'network':'ws','security':'none','wsSettings':{'path':config['ws_path'],'heartbeatPeriod':30}}}],
-        'outbounds':[{'tag':'direct','protocol':'freedom','streamSettings':{'sockopt':{'domainStrategy':strategy}}},
-                     {'tag':'block','protocol':'blackhole'}],
-        'routing':{'domainStrategy':'IPIfNonMatch','rules':[
-            {'type':'field','inboundTag':['system-dns'],'ip':dns['servers'],'port':'53','outboundTag':'direct'},
-            {'type':'field','ip':['geoip:private'],'outboundTag':'block'}]}}
-    candidate = ETC/'xray-candidate.json'
-    write(candidate, xray, 0o640, 'xray')
-    # The service user must be able to read the final location; validation here is root.
-    run('/opt/xray/xray', 'run', '-test', '-config', str(candidate))
-    write(XRAY_ETC/'config.json', xray, 0o640, 'xray')
-    candidate.unlink()
+    # XHTTP is an addition: any failure here leaves the WebSocket nodes exactly as before.
+    try:
+        tunnel = start_router(config)
+    except Exception as error:
+        print('XHTTP 长连接入口未启用，继续使用 WebSocket 节点：'+(str(error) or type(error).__name__), flush=True)
+        stop_router()
+        tunnel = None
+    install_xray_config(xray_config(config, certificates, tunnel))
     unit('xray.service', '''[Unit]
 Description=ProxySub Xray TLS and WebSocket service
 After=network-online.target proxy-subscription.service
@@ -381,6 +561,17 @@ WantedBy=timers.target
     run('systemctl', 'daemon-reload')
     run('systemctl', 'enable', '--now', 'xray.service', 'proxy-cert-renew.timer')
     run('systemctl', 'restart', 'xray.service')
+    if tunnel and not router_healthy(config, tunnel):
+        print('XHTTP 长连接入口未通过自检，已恢复为仅 WebSocket 节点。', flush=True)
+        stop_router()
+        tunnel = None
+        install_xray_config(xray_config(config, certificates, None))
+        run('systemctl', 'restart', 'xray.service')
+    # The subscription service offers XHTTP nodes only while this file exists.
+    if tunnel:
+        write(ETC/'xhttp.json', tunnel, 0o640, 'proxy-sub')
+    else:
+        (ETC/'xhttp.json').unlink(missing_ok=True)
     run('runuser', '-u', 'xray', '--', '/opt/xray/xray', 'run', '-test', '-config', str(XRAY_ETC/'config.json'))
     run('systemctl', 'is-active', 'xray.service', 'proxy-subscription.service', 'proxy-cert-renew.timer')
     setup_domain_worker()

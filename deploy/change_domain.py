@@ -63,7 +63,8 @@ def new_config(old, domain):
     retired = set(old.get('retired_domains', [])) | {old['domain']}
     retired.discard(domain)
     return old | {'domain': domain, 'node_password': secrets.token_urlsafe(32),
-                  'ws_path': '/connect-'+secrets.token_hex(12), 'retired_domains': sorted(retired)}
+                  'ws_path': '/connect-'+secrets.token_hex(12), 'xhttp_path': '/link-'+secrets.token_hex(12),
+                  'retired_domains': sorted(retired)}
 
 
 def health(domain):

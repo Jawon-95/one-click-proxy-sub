@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -161,6 +162,44 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(plain.splitlines()[0], head)
             _, filtered = self.request(path+'?target=v2rayn&cdn=1')
             self.assertEqual(base64.b64decode(filtered).splitlines(), cdn.splitlines())
+        finally:
+            state.unlink()
+
+    def test_xhttp_nodes_for_xray_clients(self):
+        path = '/subscribe/main'
+        lines = lambda query, agent='': self.request(path+query, headers={'User-Agent': agent})[1].decode().splitlines()
+        original = lines('?target=plain')
+        # Without a published XHTTP inbound every client keeps the WebSocket nodes.
+        self.assertEqual(lines('?target=plain&transport=xhttp'), original)
+        state = self.server.CONFIG_PATH.with_name('xhttp.json')
+        state.write_text(json.dumps({'path': '/link', 'id': '0b0f3bb8-8f3c-5a9c-9d39-5b8a4a4f1c11'}), encoding='utf-8')
+        try:
+            nodes = lines('?target=plain&transport=xhttp')
+            self.assertEqual(nodes[0], original[0])  # The direct node bypasses Cloudflare and keeps its transport.
+            self.assertEqual(len(nodes), len(original))
+            for before, after in zip(original[1:], nodes[1:]):
+                old, new = urllib.parse.urlsplit(before), urllib.parse.urlsplit(after)
+                self.assertEqual((new.scheme, new.username), ('vless', '0b0f3bb8-8f3c-5a9c-9d39-5b8a4a4f1c11'))
+                self.assertEqual((new.hostname, new.port, new.fragment), (old.hostname, old.port, old.fragment))
+                self.assertNotIn('fixture-proxy-secret', after)
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(nodes[1]).query)
+            self.assertEqual({key: value[0] for key, value in query.items() if key != 'extra'},
+                             {'encryption': 'none', 'security': 'tls', 'sni': 'proxy.example.com', 'alpn': 'h2',
+                              'fp': 'chrome', 'type': 'xhttp', 'host': 'proxy.example.com', 'path': '/link',
+                              'mode': 'packet-up'})
+            self.assertGreater(json.loads(query['extra'][0])['xmux']['maxConnections'], 1)
+            # v2rayN and v2rayNG are recognised; other clients stay on WebSocket unless they ask.
+            self.assertEqual(lines('?target=plain', 'v2rayN/7.25.6'), nodes)
+            self.assertEqual(lines('?target=plain', 'v2rayNG/1.10.2'), nodes)
+            self.assertEqual(lines('?target=plain', 'Shadowrocket/2701'), original)
+            self.assertEqual(lines('?target=plain&transport=ws', 'v2rayN/7.25.6'), original)
+            _, raw = self.request(path+'?target=v2rayn')
+            self.assertEqual(base64.b64decode(raw).decode().splitlines(), nodes)
+            _, cdn = self.request(path+'?target=v2rayn&cdn=1')
+            self.assertEqual(base64.b64decode(cdn).decode().splitlines(), nodes[1:])
+            _, clash = self.request(path+'?target=clash', headers={'User-Agent': 'v2rayN/7.25.6'})
+            self.assertNotIn(b'xhttp', clash)
+            _, qr = self.request('/api/subscriptions/1/qr?target=raw&transport=ws', status=401, headers={'Cookie': ''})
         finally:
             state.unlink()
 

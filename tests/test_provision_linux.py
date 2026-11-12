@@ -29,7 +29,8 @@ class ProvisionTests(unittest.TestCase):
             cert=module.LETSENCRYPT/'live/proxy.example.com'
             module.write(cert/'fullchain.pem','fixture-certificate')
             module.write(cert/'privkey.pem','fixture-private-key',0o600)
-            with patch.object(module,'unit'),patch.object(module,'run'):
+            with patch.object(module,'unit'),patch.object(module,'run'),\
+                 patch.object(module,'start_router',side_effect=OSError('router unavailable')):
                 previous=os.umask(0o077)
                 try:module.activate()
                 finally:os.umask(previous)
@@ -40,6 +41,36 @@ class ProvisionTests(unittest.TestCase):
             self.assertEqual((module.CERTS/'domain/privkey.pem').stat().st_mode&0o777,0o640)
             config=json.loads((module.XRAY_ETC/'config.json').read_text())
             self.assertTrue(config['inbounds'][0]['streamSettings']['tlsSettings']['rejectUnknownSni'])
+            # Without the router the server stays WebSocket-only and offers no XHTTP nodes.
+            self.assertEqual(config['inbounds'][0]['streamSettings']['tlsSettings']['alpn'],['http/1.1'])
+            self.assertEqual([i['tag'] for i in config['inbounds']],['trojan-tls','trojan-ws'])
+            self.assertEqual(config['inbounds'][0]['settings']['fallbacks'][0]['dest'],'127.0.0.1:8080')
+            self.assertFalse((module.ETC/'xhttp.json').exists())
+            saved=module.read(module.ETC/'config.json')
+            tunnel=module.xhttp_identity(saved)
+            caddyfile=module.router_config(saved,tunnel)
+            for expected in ('bind 127.0.0.1','path /link /link/*','h2c://127.0.0.1:10002','@websocket path /connect','127.0.0.1:8080'):
+                self.assertIn(expected,caddyfile)
+            # A healthy router publishes XHTTP; an unhealthy one is rolled back to WebSocket only.
+            for healthy in (True,False):
+                with patch.object(module,'unit'),patch.object(module,'run'),\
+                     patch.object(module,'start_router',return_value=tunnel),\
+                     patch.object(module,'router_healthy',return_value=healthy):
+                    previous=os.umask(0o077)
+                    try:module.activate()
+                    finally:os.umask(previous)
+                config=json.loads((module.XRAY_ETC/'config.json').read_text())
+                self.assertEqual((module.ETC/'xhttp.json').exists(),healthy)
+                self.assertEqual([i['tag'] for i in config['inbounds']],['trojan-tls','trojan-ws']+['vless-xhttp']*healthy)
+                self.assertEqual(config['inbounds'][0]['streamSettings']['tlsSettings']['alpn'],['h2','http/1.1'] if healthy else ['http/1.1'])
+                self.assertEqual(config['inbounds'][0]['settings']['fallbacks'],
+                                 [{'dest':'127.0.0.1:10003' if healthy else '127.0.0.1:8080','xver':0},
+                                  {'path':'/connect','dest':'127.0.0.1:10001','xver':0}])
+                if healthy:
+                    self.assertEqual(json.loads((module.ETC/'xhttp.json').read_text()),tunnel)
+                    self.assertEqual(config['inbounds'][2]['settings']['clients'][0]['id'],tunnel['id'])
+                    self.assertEqual(config['inbounds'][2]['streamSettings']['xhttpSettings']['path'],'/link')
+                    self.assertEqual((module.ETC/'xhttp.json').stat().st_mode&0o777,0o640)
 
     def test_fresh_install_and_repeat_keep_state(self):
         spec=importlib.util.spec_from_file_location('isolated_provision',ROOT/'deploy/provision.py')

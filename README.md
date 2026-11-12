@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/Jawon-95/one-click-proxy-sub/refs/h
 ## 功能
 
 - **自动生成节点**：内置 Trojan + WebSocket + TLS，固定保留自己的 Host/SNI，支持 Cloudflare 橙云。
+- **CDN 节点长连接**：v2rayN / v2rayNG 订阅中的 Cloudflare 节点使用 VLESS + XHTTP，复用 HTTP/2 长连接，打开新网页无需重新握手；其他客户端继续使用 WebSocket。[说明](docs/DEPLOYMENT.md#cdn-节点的-xhttp-长连接)
 - **直连节点置顶**：订阅第一个节点直接连接服务器公网 IP（SNI/Host 仍为自己的域名），不经过 Cloudflare，CDN 整体变慢时可作为备选。
 - **简短顺序命名**：节点从 `001` 开始，按输出顺序显示为 `001 | SG 备注`、`002 | SG 备注`、`003 | SG 备注`，不足三位补零；竖线后的国家缩写（如 `SG`、`PH`）在安装/更新时根据服务器公网 IP 自动识别，原优选 IP/域名备注保持不变；在客户端更新订阅即可获得新名称。
 - **219 个预置入口**：17 个域名、202 个 IP，加上直连节点和默认自动入口，首次订阅可获取 **221 个节点**。
